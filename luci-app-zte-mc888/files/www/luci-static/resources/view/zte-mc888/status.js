@@ -121,25 +121,20 @@ function metric(label, kind, value, unit) {
 	]);
 }
 
-/* Cell ID przychodzi w hex; btsearch.pl oczekuje wartosci dziesietnej.
+/* Cell ID przychodzi w hex; pokazujemy tez wartosc dziesietna (ECI), bo to nia
+ * posluguje sie btsearch i wiekszosc narzedzi.
  *
- * Uwaga: btsearch.pl jest dzis SPA (renderuje sie po stronie przegladarki, za
- * Cloudflare), wiec z serwera nie da sie potwierdzic, czy stary glaboki link
- * `szukaj.php?mode=std&search=` jest nadal obslugiwany - kazdy adres zwraca ten
- * sam szkielet. Dlatego numer dziesietny jest TAKZE wypisany w tresci odnosnika:
- * jesli deep link wyladuje na stronie glownej, wystarczy go skopiowac.
+ * Swiadomie BEZ odnosnika: stary glaboki link `szukaj.php?mode=std&search=` nie
+ * dziala - btsearch jest dzis SPA i kazdy adres zwraca ten sam szkielet HTML.
+ * Identyfikacje masztu robi backend przez /api/v1/search, a wynik pokazuje
+ * sekcja "Stacja bazowa" nizej.
  */
 function cellId(hex) {
 	if (!hex) return '–';
 	var dec = parseInt(String(hex), 16);
 	if (isNaN(dec)) return txt(hex);
 
-	return E('a', {
-		'href': 'https://btsearch.pl/szukaj.php?mode=std&search=' + dec,
-		'target': '_blank',
-		'rel': 'noopener noreferrer',
-		'title': _('Sprawdź stację bazową w btsearch.pl')
-	}, hex + ' (' + dec + ')');
+	return hex + ' (' + dec + ')';
 }
 
 function infoTable(rows) {

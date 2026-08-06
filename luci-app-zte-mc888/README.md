@@ -73,8 +73,8 @@ właśnie tam zamiast do osobnego elementu.
 ### Rozpoznawanie stacji bazowej (btsearch.pl)
 
 Zakładka Status pokazuje **operatora, miejscowość, adres i współrzędne masztu**, z którego
-wisi modem, plus odnośnik do mapy OpenStreetMap. Cell ID jest dodatkowo odnośnikiem do
-btsearch.pl.
+wisi modem, plus odnośnik do mapy OpenStreetMap. Cell ID wypisany jest szesnastkowo
+i dziesiętnie (`21ab417 (35304471)`), ale **bez odnośnika** — patrz niżej.
 
 Stary link `szukaj.php?mode=std&search=` **nie działa** — btsearch.pl jest dziś SPA za
 Cloudflare i każdy adres zwraca ten sam ~5,8 kB szkielet HTML. Jest za to publiczne API:
