@@ -70,12 +70,37 @@ z motywu. Warto wiedzieć, że motyw renderuje atrybut `title` jako etykietę **
 (`.cbi-progressbar::before { content: attr(title) }`), więc wartość i ocena jakości trafiają
 właśnie tam zamiast do osobnego elementu.
 
-**Cell ID jest odnośnikiem do [btsearch.pl](https://btsearch.pl)** — bazy polskich stacji
-bazowych. Modem podaje Cell ID szesnastkowo, btsearch oczekuje dziesiętnie
-(`parseInt(hex, 16)`). Numer dziesiętny jest **wypisany także w treści odnośnika**, bo
-btsearch.pl jest dziś SPA za Cloudflare: każdy adres zwraca ten sam szkielet HTML, więc
-nie da się z serwera potwierdzić, czy stary głęboki link `szukaj.php?mode=std&search=`
-jest nadal obsługiwany. Jeśli nie — wystarczy skopiować widoczny numer.
+### Rozpoznawanie stacji bazowej (btsearch.pl)
+
+Zakładka Status pokazuje **operatora, miejscowość, adres i współrzędne masztu**, z którego
+wisi modem, plus odnośnik do mapy OpenStreetMap. Cell ID jest dodatkowo odnośnikiem do
+btsearch.pl.
+
+Stary link `szukaj.php?mode=std&search=` **nie działa** — btsearch.pl jest dziś SPA za
+Cloudflare i każdy adres zwraca ten sam ~5,8 kB szkielet HTML. Jest za to publiczne API:
+
+```
+POST https://btsearch.pl/api/v1/search
+Content-Type: application/json
+
+{"query": "ecid: 35304471"}
+```
+
+Modem podaje Cell ID **szesnastkowo** (`21ab417`), API szuka po **dziesiętnym ECI**
+(`35304471`). Odpowiedź zawiera `data[0].operator.name`, `data[0].location.{city,address,
+latitude,longitude}` oraz listę komórek z `ecid` / `enbid` / `clid` / `earfcn`.
+
+> `ecid:` i `enbid:` są prawdziwymi filtrami. Uwaga na inne nazwy — `clid:` czy `pci:`
+> wyglądają na fallback do wyszukiwania tekstowego po `station_id` i zwracają przypadkowe
+> stacje. Trafienie warto potwierdzić po `ecid` w zwróconych komórkach.
+
+Backend **cache'uje odpowiedź w tmpfs pod numerem komórki** (`/tmp/zte-mc888.bts.<dec>.json`)
+— maszt zmienia się rzadko, więc to jedno zapytanie na zmianę komórki, nie przy każdym
+odświeżeniu. Ciepły odczyt ~0,15 s, zimny ~0,46 s. Cache jest przycinany do 20 ostatnich
+komórek. Nietrafione zapytanie **nie jest cache'owane** — spróbuje ponownie.
+
+Wyłącznik: `option bts_lookup '0'` (albo pole w zakładce Konfiguracja) — wtedy Cell ID
+**nie opuszcza sieci lokalnej**.
 
 **Żadnych dodatkowych pakietów.** Na R2 nie ma `openssl` ani `base64`, więc:
 

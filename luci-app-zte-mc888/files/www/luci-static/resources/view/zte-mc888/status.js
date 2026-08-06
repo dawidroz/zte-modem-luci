@@ -152,6 +152,37 @@ function infoTable(rows) {
 		}));
 }
 
+/* Dane masztu z btsearch.pl (dopasowane po Cell ID przez backend).
+   Zwraca tablice wezlow albo null, gdy nic nie wiadomo. */
+function station(st) {
+	if (!st._bts_station && !st._bts_city)
+		return null;
+
+	var rows = [
+		st._bts_operator ? [_('Operator'),    txt(st._bts_operator)] : null,
+		st._bts_station  ? [_('Stacja'),      txt(st._bts_station)]  : null,
+		st._bts_city     ? [_('Miejscowość'), txt(st._bts_city)]     : null,
+		st._bts_address  ? [_('Adres'),       txt(st._bts_address)]  : null
+	];
+
+	if (st._bts_lat && st._bts_lon) {
+		var ll = st._bts_lat + '/' + st._bts_lon;
+		rows.push([_('Współrzędne'), E('a', {
+			'href': 'https://www.openstreetmap.org/?mlat=' + st._bts_lat +
+			        '&mlon=' + st._bts_lon + '#map=16/' + ll,
+			'target': '_blank',
+			'rel': 'noopener noreferrer'
+		}, st._bts_lat + ', ' + st._bts_lon + ' — ' + _('pokaż na mapie'))]);
+	}
+
+	return [
+		E('h4', { 'style': 'margin:1.2em 0 .3em' }, _('Stacja bazowa')),
+		infoTable(rows),
+		E('div', { 'style': 'font-size:.8em;opacity:.6;margin-top:.3em' },
+			_('Dane z btsearch.pl (wykaz pozwoleń radiowych UKE), dopasowane po Cell ID.'))
+	];
+}
+
 function block(title, children) {
 	return E('div', { 'style': 'margin-bottom:1.2em' }, [
 		E('h4', { 'style': 'margin:.3em 0 .5em' }, title),
@@ -257,6 +288,10 @@ function renderStatus(st) {
 	if (!hasLte && !has5g)
 		out.push(banner(_('Brak danych o sygnale — modem nie zwrócił żadnej metryki.'),
 			COLORS.ok));
+
+	var stn = station(st);
+	if (stn)
+		stn.forEach(function(node) { out.push(node); });
 
 	out.push(footer(st));
 
@@ -418,6 +453,12 @@ return view.extend({
 		o.datatype = 'range(1,30)';
 		o.placeholder = '6';
 		o.optional = true;
+
+		o = s.option(form.Flag, 'bts_lookup', _('Rozpoznawaj stację bazową'),
+			_('Odpytuje btsearch.pl po Cell ID i pokazuje lokalizację masztu. ' +
+			  'Wyłącz, jeśli nie chcesz wysyłać Cell ID do zewnętrznego serwisu.'));
+		o.default = '1';
+		o.rmempty = false;
 
 		o = s.option(form.DummyValue, '_variant', _('Wariant logowania'),
 			_('Wykrywany automatycznie przy pierwszym udanym logowaniu.'));

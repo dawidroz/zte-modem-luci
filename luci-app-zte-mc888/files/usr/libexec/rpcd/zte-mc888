@@ -14,6 +14,10 @@
 CACHE="/tmp/zte-mc888.json"
 COOKIE="/tmp/zte-mc888.cookie"
 LOCK="/tmp/zte-mc888.lock"
+BTS_CACHE="/tmp/zte-mc888.bts"
+
+BTS_API="https://btsearch.pl/api/v1/search"
+BTS_LOOKUP="$(uci -q get zte-mc888.main.bts_lookup)"; [ -n "$BTS_LOOKUP" ] || BTS_LOOKUP=1
 
 HOST="$(uci -q get zte-mc888.main.host)";                 [ -n "$HOST" ] || HOST="192.168.32.1"
 PASSWORD="$(uci -q get zte-mc888.main.password)"
@@ -132,6 +136,46 @@ _ensure_session() {
 }
 
 #
+# --- identyfikacja stacji bazowej (btsearch.pl) -----------------------------
+#
+# Modem podaje Cell ID szesnastkowo; btsearch szuka po dziesietnym ECI:
+#   POST https://btsearch.pl/api/v1/search   {"query":"ecid: <dec>"}
+#
+# Wynik jest cache'owany w tmpfs pod numerem komorki - maszt zmienia sie rzadko,
+# wiec to jedno zapytanie na zmiane komorki, a nie przy kazdym odswiezeniu.
+# (Stary link `szukaj.php?mode=std&search=` juz nie dziala serwerowo: btsearch
+# jest dzis SPA i kazdy adres zwraca ten sam szkielet HTML.)
+#
+
+# hex -> dec, z walidacja; puste wyjscie = wejscie nie bylo hexem
+_hex2dec() {
+	case "$1" in
+		""|*[!0-9a-fA-F]*) return 1 ;;
+	esac
+	printf '%d' "0x$1" 2>/dev/null
+}
+
+_bts_fetch() { # $1 = ecid dziesietnie, $2 = plik cache
+	local resp
+
+	resp="$(curl -sS --max-time 8 -X POST "$BTS_API" \
+		-H 'Content-Type: application/json' \
+		-H 'Accept: application/json' \
+		-d "{\"query\":\"ecid: $1\"}" 2>/dev/null)"
+
+	# Pusta odpowiedz albo brak trafienia - nie cache'uj, sprobujemy pozniej.
+	[ -n "$resp" ] || return 1
+	[ -n "$(printf '%s' "$resp" | jsonfilter -q -e '@.data[0].station_id')" ] || return 1
+
+	printf '%s' "$resp" > "$2"
+
+	# Nie hoduj cache'a w nieskonczonosc przy skakaniu po komorkach.
+	ls -t "${BTS_CACHE}".*.json 2>/dev/null | tail -n +21 | while read -r old; do
+		rm -f "$old"
+	done
+}
+
+#
 # --- pobranie danych -------------------------------------------------------
 #
 
@@ -168,6 +212,27 @@ _refresh() {
 		return
 	fi
 
+	# --- stacja bazowa ---------------------------------------------------
+	local cid dec f bts_station="" bts_operator="" bts_city="" bts_addr=""
+	local bts_lat="" bts_lon=""
+
+	if [ "$BTS_LOOKUP" = "1" ]; then
+		cid="$(printf '%s' "$data" | jsonfilter -q -e '@.cell_id')"
+		dec="$(_hex2dec "$cid")"
+		if [ -n "$dec" ]; then
+			f="${BTS_CACHE}.${dec}.json"
+			[ -s "$f" ] || _bts_fetch "$dec" "$f"
+			if [ -s "$f" ]; then
+				bts_station="$(jsonfilter -q -i "$f" -e '@.data[0].station_id')"
+				bts_operator="$(jsonfilter -q -i "$f" -e '@.data[0].operator.name')"
+				bts_city="$(jsonfilter -q -i "$f" -e '@.data[0].location.city')"
+				bts_addr="$(jsonfilter -q -i "$f" -e '@.data[0].location.address')"
+				bts_lat="$(jsonfilter -q -i "$f" -e '@.data[0].location.latitude')"
+				bts_lon="$(jsonfilter -q -i "$f" -e '@.data[0].location.longitude')"
+			fi
+		fi
+	fi
+
 	json_init
 	json_load "$data" 2>/dev/null
 	json_add_string  "_host" "$HOST"
@@ -175,6 +240,13 @@ _refresh() {
 	json_add_boolean "_authenticated" "$authed"
 	json_add_boolean "_stale" 0
 	json_add_string  "_variant" "${variant:-}"
+	[ -n "$dec" ]          && json_add_string "_cell_dec"     "$dec"
+	[ -n "$bts_station" ]  && json_add_string "_bts_station"  "$bts_station"
+	[ -n "$bts_operator" ] && json_add_string "_bts_operator" "$bts_operator"
+	[ -n "$bts_city" ]     && json_add_string "_bts_city"     "$bts_city"
+	[ -n "$bts_addr" ]     && json_add_string "_bts_address"  "$bts_addr"
+	[ -n "$bts_lat" ]      && json_add_string "_bts_lat"      "$bts_lat"
+	[ -n "$bts_lon" ]      && json_add_string "_bts_lon"      "$bts_lon"
 	[ -n "$err" ] && json_add_string "_error" "$err"
 	json_dump
 }

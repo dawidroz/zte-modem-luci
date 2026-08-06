@@ -10,3 +10,6 @@ config zte-mc888 'main'
 	option timeout '6'
 	# Wykryty wariant hashowania hasla - ustawiany automatycznie, nie ruszac recznie.
 	option hash_variant ''
+	# Rozpoznawanie stacji bazowej przez API btsearch.pl (wysyla Cell ID na zewnatrz).
+	# 0 = wylacz, jesli nie chcesz odpytywac zewnetrznego serwisu.
+	option bts_lookup '1'
