@@ -11,13 +11,40 @@ var callProbe  = rpc.declare({ object: 'zte-mc888', method: 'probe'  });
 
 var COLORS = { good: '#4caf50', ok: '#ff9800', poor: '#e53935' };
 
-/* Progi jakosci sygnalu: poor = ponizej tego zle, good = powyzej tego dobrze,
-   min/max sluza tylko do wyliczenia dlugosci paska. */
-var SCALE = {
-	rsrp: { poor: -100, good: -80, min: -130, max: -60 },
-	rsrq: { poor:  -15, good: -10, min:  -25, max:  -3 },
-	sinr: { poor:    0, good:  20, min:  -10, max:  30 },
-	rssi: { poor:  -85, good: -65, min: -110, max: -40 }
+/* Czterostopniowa skala jakosci sygnalu.
+ *
+ * `steps` jest uporzadkowane malejaco i wygrywa PIERWSZY pasujacy prog, wiec
+ * przedzialy sa rozlaczne z definicji. (W 3ginfo-lite, skad wziety jest pomysl
+ * nazwanych poziomow, warunki zachodzily na siebie - np. dla RSRQ zarowno
+ * `>= -10` jak i `>= -15 && <= -9` lapaly wartosc -10.)
+ *
+ * `from: null` = kosz na wszystko ponizej; min/max sluza tylko do dlugosci paska.
+ */
+var TIERS = {
+	rsrp: { min: -130, max: -60, steps: [
+		{ from:  -80, label: _('Doskonały'),     color: '#4caf50' },
+		{ from:  -90, label: _('Dobry'),         color: '#8bc34a' },
+		{ from: -100, label: _('Średni'),        color: '#ff9800' },
+		{ from: null, label: _('Skraj komórki'), color: '#e53935' }
+	] },
+	rsrq: { min: -25, max: -3, steps: [
+		{ from:  -10, label: _('Doskonały'),     color: '#4caf50' },
+		{ from:  -15, label: _('Dobry'),         color: '#8bc34a' },
+		{ from:  -20, label: _('Średni'),        color: '#ff9800' },
+		{ from: null, label: _('Skraj komórki'), color: '#e53935' }
+	] },
+	sinr: { min: -10, max: 30, steps: [
+		{ from:   20, label: _('Doskonały'),     color: '#4caf50' },
+		{ from:   13, label: _('Dobry'),         color: '#8bc34a' },
+		{ from:    1, label: _('Średni'),        color: '#ff9800' },
+		{ from: null, label: _('Skraj komórki'), color: '#e53935' }
+	] },
+	rssi: { min: -110, max: -40, steps: [
+		{ from:  -65, label: _('Doskonały'),     color: '#4caf50' },
+		{ from:  -75, label: _('Dobry'),         color: '#8bc34a' },
+		{ from:  -85, label: _('Średni'),        color: '#ff9800' },
+		{ from: null, label: _('Skraj komórki'), color: '#e53935' }
+	] }
 };
 
 var NETWORK_TYPES = {
@@ -55,37 +82,64 @@ function rate(v) {
 }
 
 function quality(kind, v) {
-	var s = SCALE[kind], n = num(v);
-	if (!s || n === null) return null;
-	var pct = Math.max(0, Math.min(100, (n - s.min) / (s.max - s.min) * 100));
+	var t = TIERS[kind], n = num(v);
+	if (!t || n === null) return null;
+
+	var step = t.steps[t.steps.length - 1];
+	for (var i = 0; i < t.steps.length; i++) {
+		if (t.steps[i].from === null || n >= t.steps[i].from) {
+			step = t.steps[i];
+			break;
+		}
+	}
+
 	return {
 		value: n,
-		pct: pct,
-		cls: (n >= s.good) ? 'good' : (n >= s.poor ? 'ok' : 'poor')
+		pct: Math.max(0, Math.min(100, (n - t.min) / (t.max - t.min) * 100)),
+		label: step.label,
+		color: step.color
 	};
 }
 
+/* Uzywa natywnego .cbi-progressbar z LuCI - motyw renderuje `title` jako
+   etykiete NAD paskiem (`::before { content: attr(title) }`), wiec wartosc
+   i ocena jakosci trafiaja tam zamiast do osobnego diva. */
 function metric(label, kind, value, unit) {
 	var q = quality(kind, value);
-	var color = q ? COLORS[q.cls] : 'var(--border-color-medium, #999)';
+	var caption = q
+		? (q.value + (unit ? ' ' + unit : '') + ' · ' + q.label)
+		: _('brak danych');
 
 	return E('div', {
-		'style': 'flex:1 1 150px;min-width:150px;padding:10px;' +
+		'style': 'flex:1 1 190px;min-width:190px;padding:10px 12px 6px;' +
 		         'border:1px solid var(--border-color-low,#ccc);border-radius:6px'
 	}, [
 		E('div', { 'style': 'font-size:.85em;opacity:.75' }, label),
-		E('div', { 'style': 'font-size:1.5em;font-weight:600;margin:.15em 0' },
-			q ? (q.value + (unit ? ' ' + unit : '')) : '–'),
-		E('div', {
-			'style': 'height:6px;border-radius:3px;overflow:hidden;' +
-			         'background:var(--border-color-low,#ddd)'
-		}, [
-			E('div', {
-				'style': 'height:100%;background:' + color +
-				         ';width:' + (q ? q.pct.toFixed(0) : 0) + '%'
-			})
-		])
+		E('div', { 'class': 'cbi-progressbar', 'title': caption },
+			E('div', { 'style': 'width:' + (q ? q.pct.toFixed(0) : 0) + '%' +
+			                    (q ? ';background:' + q.color : '') }))
 	]);
+}
+
+/* Cell ID przychodzi w hex; btsearch.pl oczekuje wartosci dziesietnej.
+ *
+ * Uwaga: btsearch.pl jest dzis SPA (renderuje sie po stronie przegladarki, za
+ * Cloudflare), wiec z serwera nie da sie potwierdzic, czy stary glaboki link
+ * `szukaj.php?mode=std&search=` jest nadal obslugiwany - kazdy adres zwraca ten
+ * sam szkielet. Dlatego numer dziesietny jest TAKZE wypisany w tresci odnosnika:
+ * jesli deep link wyladuje na stronie glownej, wystarczy go skopiowac.
+ */
+function cellId(hex) {
+	if (!hex) return '–';
+	var dec = parseInt(String(hex), 16);
+	if (isNaN(dec)) return txt(hex);
+
+	return E('a', {
+		'href': 'https://btsearch.pl/szukaj.php?mode=std&search=' + dec,
+		'target': '_blank',
+		'rel': 'noopener noreferrer',
+		'title': _('Sprawdź stację bazową w btsearch.pl')
+	}, hex + ' (' + dec + ')');
 }
 
 function infoTable(rows) {
@@ -178,7 +232,7 @@ function renderStatus(st) {
 			st.lte_ca_scell_bandwidth ? [_('Szerokość (SCell)'), txt(st.lte_ca_scell_bandwidth) + ' MHz'] : null,
 			st.lte_ca_pcell_arfcn ? [_('EARFCN'), txt(st.lte_ca_pcell_arfcn)] : null,
 			[_('PCI'),                txt(st.lte_pci)],
-			[_('Cell ID'),            txt(st.cell_id)]
+			[_('Cell ID'),            cellId(st.cell_id)]
 		]));
 	}
 
@@ -196,7 +250,7 @@ function renderStatus(st) {
 			[_('Pasmo'),    txt(st.nr5g_action_band)],
 			[_('Kanał'),    txt(st.nr5g_action_channel)],
 			[_('PCI'),      txt(st.nr5g_pci)],
-			st.Z5g_CELL_ID ? [_('Cell ID'), txt(st.Z5g_CELL_ID)] : null
+			st.Z5g_CELL_ID ? [_('Cell ID'), cellId(st.Z5g_CELL_ID)] : null
 		]));
 	}
 

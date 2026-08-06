@@ -38,12 +38,44 @@ files/usr/share/luci/menu.d/luci-app-zte-mc888.json       wpis menu (admin/servi
 files/www/luci-static/resources/view/zte-mc888/status.js  widok: zakładki Status i Konfiguracja
 ```
 
-Strona ma dwie zakładki, zrobione wbudowanym mechanizmem `form.Map` (`m.tabbed = true`),
+Strona ma trzy zakładki, zrobione wbudowanym mechanizmem `form.Map` (`m.tabbed = true`),
 tak samo jak apcontroller. Przy `m.tabbed` **każda sekcja mapy staje się osobną zakładką**:
 `data-tab` bierze się z `sectiontype`, a etykieta z `title` sekcji. Stąd wymóg —
 **obie sekcje muszą mieć różny `sectiontype`**, inaczej `ui.tabs.initTabGroup()` skleja je
-w jedną. Zakładka Status to własna podklasa `form.NamedSection` z nadpisanym `render()`
-(sectiontype `status`), konfiguracja siedzi w zwykłej sekcji (sectiontype `zte-mc888`).
+w jedną. Zakładki Status i Transfer to własne podklasy `form.NamedSection` z nadpisanym
+`render()` (sectiontype `status` / `transfer`), konfiguracja siedzi w zwykłej sekcji
+(sectiontype `zte-mc888`).
+
+### Prezentacja sygnału
+
+Czterostopniowa skala z nazwanym poziomem — **Doskonały / Dobry / Średni / Skraj komórki** —
+zamiast samego koloru. Pomysł zapożyczony z
+[luci-app-3ginfo-lite](https://github.com/4IceG/luci-app-3ginfo-lite), implementacja własna,
+bo tam progi **zachodzą na siebie** (dla RSRQ warunki `>= -10` oraz `>= -15 && <= -9` łapią
+jednocześnie −10 i −9, wygrywa ostatni sprawdzony), a wyliczanie długości paska potrafi
+przekroczyć 100% i jest łatane hackiem `width:33%` na kontenerze.
+
+Tutaj `TIERS[*].steps` jest uporządkowane malejąco i wygrywa **pierwszy** pasujący próg,
+więc przedziały są rozłączne z definicji:
+
+| | Doskonały | Dobry | Średni | Skraj komórki |
+|---|---|---|---|---|
+| RSRP [dBm] | ≥ −80 | −90…−81 | −100…−91 | < −100 |
+| RSRQ [dB] | ≥ −10 | −15…−11 | −20…−16 | < −20 |
+| SINR [dB] | ≥ 20 | 13…19 | 1…12 | ≤ 0 |
+| RSSI [dBm] | ≥ −65 | −75…−66 | −85…−76 | < −85 |
+
+Pasek to natywny **`.cbi-progressbar`** z LuCI, nie własne div-y — dziedziczy wygląd
+z motywu. Warto wiedzieć, że motyw renderuje atrybut `title` jako etykietę **nad** paskiem
+(`.cbi-progressbar::before { content: attr(title) }`), więc wartość i ocena jakości trafiają
+właśnie tam zamiast do osobnego elementu.
+
+**Cell ID jest odnośnikiem do [btsearch.pl](https://btsearch.pl)** — bazy polskich stacji
+bazowych. Modem podaje Cell ID szesnastkowo, btsearch oczekuje dziesiętnie
+(`parseInt(hex, 16)`). Numer dziesiętny jest **wypisany także w treści odnośnika**, bo
+btsearch.pl jest dziś SPA za Cloudflare: każdy adres zwraca ten sam szkielet HTML, więc
+nie da się z serwera potwierdzić, czy stary głęboki link `szukaj.php?mode=std&search=`
+jest nadal obsługiwany. Jeśli nie — wystarczy skopiować widoczny numer.
 
 **Żadnych dodatkowych pakietów.** Na R2 nie ma `openssl` ani `base64`, więc:
 
