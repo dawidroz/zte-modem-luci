@@ -1,0 +1,14 @@
+{
+	"admin/services/zte-mc888": {
+		"title": "ZTE MC888",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "zte-mc888/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-zte-mc888" ],
+			"uci": { "zte-mc888": true }
+		}
+	}
+}

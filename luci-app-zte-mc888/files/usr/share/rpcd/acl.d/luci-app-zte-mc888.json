@@ -1,0 +1,14 @@
+{
+	"luci-app-zte-mc888": {
+		"description": "Grant access to ZTE MC888 modem monitoring",
+		"read": {
+			"ubus": {
+				"zte-mc888": [ "status", "probe" ]
+			},
+			"uci": [ "zte-mc888" ]
+		},
+		"write": {
+			"uci": [ "zte-mc888" ]
+		}
+	}
+}

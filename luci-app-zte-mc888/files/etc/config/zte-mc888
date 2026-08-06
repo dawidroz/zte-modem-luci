@@ -1,0 +1,12 @@
+config zte-mc888 'main'
+	# Adres modemu. UWAGA: to NIE jest adres routera, na ktorym stoi ten modul.
+	option host '192.168.32.1'
+	# Haslo administratora modemu. Puste = uzupelnij w LuCI (nie trzymamy go w repo).
+	option password ''
+	# Co ile sekund odpytywac modem (5-300). Chroni tez przed zalewaniem modemu,
+	# gdy otwartych jest kilka kart LuCI naraz.
+	option refresh_interval '10'
+	# Timeout pojedynczego zapytania HTTP do modemu.
+	option timeout '6'
+	# Wykryty wariant hashowania hasla - ustawiany automatycznie, nie ruszac recznie.
+	option hash_variant ''

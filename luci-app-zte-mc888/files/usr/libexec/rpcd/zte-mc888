@@ -1,0 +1,280 @@
+#!/bin/sh
+#
+# Backend rpcd dla monitoringu modemu ZTE MC888.
+# Rozmawia z modemem po HTTP (goform), zwraca JSON dla widoku LuCI.
+#
+# Zalozenia:
+#  - tylko odczyt, zadnych operacji zapisu na modemie
+#  - cookie sesji jest REUZYWANE (modem dopuszcza jedna sesje admina naraz)
+#  - odpowiedz jest cache'owana, zeby N otwartych kart LuCI = 1 zapytanie do modemu
+#
+
+. /usr/share/libubox/jshn.sh
+
+CACHE="/tmp/zte-mc888.json"
+COOKIE="/tmp/zte-mc888.cookie"
+LOCK="/tmp/zte-mc888.lock"
+
+HOST="$(uci -q get zte-mc888.main.host)";                 [ -n "$HOST" ] || HOST="192.168.32.1"
+PASSWORD="$(uci -q get zte-mc888.main.password)"
+INTERVAL="$(uci -q get zte-mc888.main.refresh_interval)"; [ -n "$INTERVAL" ] || INTERVAL=10
+TIMEOUT="$(uci -q get zte-mc888.main.timeout)";           [ -n "$TIMEOUT" ] || TIMEOUT=6
+VARIANT="$(uci -q get zte-mc888.main.hash_variant)"
+
+REFERER="http://${HOST}/index.html"
+
+# Kolejnosc prob hashowania hasla. Ustalona wersja ladunie w uci (hash_variant),
+# zeby kolejne logowania nie zgadywaly od nowa.
+VARIANTS="sha256_b64 sha256_sha256 b64_plain md5_plain"
+
+F="network_type,network_provider,signalbar,wan_ipaddr,ppp_status,modem_main_state"
+F="${F},wa_inner_version,cr_version,simcard_roam,ussd_write_flag"
+F="${F},lte_rsrp,lte_rsrq,lte_rssi,lte_snr,lte_pci,cell_id"
+F="${F},lte_ca_pcell_band,lte_ca_pcell_bandwidth,lte_ca_scell_band"
+F="${F},lte_ca_scell_bandwidth,lte_ca_pcell_arfcn,wan_active_band"
+F="${F},Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_CELL_ID,nr5g_pci,nr5g_action_band,nr5g_action_channel"
+F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
+FIELDS="$F"
+
+#
+# --- narzedzia -------------------------------------------------------------
+#
+
+_get() { # $1 = query string
+	curl -s --max-time "$TIMEOUT" \
+		-b "$COOKIE" -c "$COOKIE" \
+		-H "Referer: ${REFERER}" \
+		-H "X-Requested-With: XMLHttpRequest" \
+		"http://${HOST}/goform/goform_get_cmd_process?$1" 2>/dev/null
+}
+
+# base64 przez ucode - haslo idzie przez srodowisko, NIE przez argv
+# (argv widac w ps, srodowiska pojedynczego procesu nie)
+_b64()     { ZTEPW="$1" ucode -e 'print(b64enc(getenv("ZTEPW")))' 2>/dev/null; }
+_sha_up()  { printf '%s' "$1" | sha256sum | cut -d' ' -f1 | tr 'a-f' 'A-F'; }
+_md5_lo()  { printf '%s' "$1" | md5sum    | cut -d' ' -f1; }
+
+_hash() { # $1=wariant $2=haslo $3=LD
+	local b64
+	case "$1" in
+		sha256_b64)    b64="$(_b64 "$2")"; _sha_up "${b64}${3}" ;;
+		sha256_sha256) _sha_up "$(_sha_up "$2")${3}" ;;
+		b64_plain)     _b64 "$2" ;;
+		md5_plain)     _md5_lo "${2}${3}" ;;
+	esac
+}
+
+# Czy mamy wazna sesje? ZTE wystawia do tego dedykowana komende.
+_logged_in() {
+	local v
+	v="$(_get "isTest=false&cmd=loginfo" | jsonfilter -q -e '@.loginfo' 2>/dev/null)"
+	[ "$v" = "ok" ] && return 0
+	# Fallback dla firmware bez loginfo: pole widoczne tylko po zalogowaniu.
+	v="$(_get "isTest=false&multi_data=1&cmd=lte_rsrp,Z5g_rsrp" 2>/dev/null)"
+	[ -n "$(printf '%s' "$v" | jsonfilter -q -e '@.lte_rsrp')" ] && return 0
+	[ -n "$(printf '%s' "$v" | jsonfilter -q -e '@.Z5g_rsrp')" ] && return 0
+	return 1
+}
+
+_login() { # $1 = wariant; 0 = sukces
+	local ld hash res
+	[ -n "$PASSWORD" ] || return 1
+
+	rm -f "$COOKIE"
+	ld="$(_get "isTest=false&cmd=LD" | jsonfilter -q -e '@.LD' 2>/dev/null)"
+	[ -n "$ld" ] || return 1
+
+	hash="$(_hash "$1" "$PASSWORD" "$ld")"
+	[ -n "$hash" ] || return 1
+
+	res="$(curl -s --max-time "$TIMEOUT" -b "$COOKIE" -c "$COOKIE" \
+		-H "Referer: ${REFERER}" -H "X-Requested-With: XMLHttpRequest" \
+		--data "isTest=false" \
+		--data "goformId=LOGIN" \
+		--data-urlencode "password=${hash}" \
+		"http://${HOST}/goform/goform_set_cmd_process" 2>/dev/null \
+		| jsonfilter -q -e '@.result' 2>/dev/null)"
+
+	[ "$res" = "0" ]
+}
+
+# Loguje sie tylko gdy trzeba. Zwraca wariant przez echo, 0 = mamy sesje.
+_ensure_session() {
+	local v
+
+	_logged_in && { echo "${VARIANT:-cached}"; return 0; }
+
+	for v in ${VARIANT:-$VARIANTS}; do
+		if _login "$v"; then
+			if [ "$v" != "$VARIANT" ]; then
+				uci -q set zte-mc888.main.hash_variant="$v"
+				uci -q commit zte-mc888
+			fi
+			echo "$v"
+			return 0
+		fi
+	done
+
+	# Zapamietany wariant przestal dzialac (np. zmiana hasla) - sprobuj wszystkich.
+	if [ -n "$VARIANT" ]; then
+		for v in $VARIANTS; do
+			[ "$v" = "$VARIANT" ] && continue
+			if _login "$v"; then
+				uci -q set zte-mc888.main.hash_variant="$v"
+				uci -q commit zte-mc888
+				echo "$v"
+				return 0
+			fi
+		done
+	fi
+
+	return 1
+}
+
+#
+# --- pobranie danych -------------------------------------------------------
+#
+
+_refresh() {
+	local data variant authed=0 err="" now
+
+	now="$(date +%s)"
+
+	if [ -z "$PASSWORD" ]; then
+		err="Nie ustawiono hasla do modemu"
+	else
+		variant="$(_ensure_session)" && authed=1
+		[ "$authed" -eq 1 ] || err="Logowanie do modemu nie powiodlo sie (sprawdz haslo)"
+	fi
+
+	data="$(_get "isTest=false&multi_data=1&cmd=${FIELDS}")"
+
+	if [ -z "$data" ]; then
+		# Modem nieosiagalny - oddaj ostatnie znane dane, ale oznacz blad.
+		if [ -s "$CACHE" ]; then
+			json_init
+			json_load_file "$CACHE" 2>/dev/null
+			json_add_boolean "_stale" 1
+			json_add_string  "_error" "Modem nieosiagalny pod ${HOST}"
+			json_dump
+			return
+		fi
+		json_init
+		json_add_string  "_error" "Modem nieosiagalny pod ${HOST}"
+		json_add_string  "_host" "$HOST"
+		json_add_int     "_timestamp" "$now"
+		json_add_boolean "_authenticated" 0
+		json_dump
+		return
+	fi
+
+	json_init
+	json_load "$data" 2>/dev/null
+	json_add_string  "_host" "$HOST"
+	json_add_int     "_timestamp" "$now"
+	json_add_boolean "_authenticated" "$authed"
+	json_add_boolean "_stale" 0
+	json_add_string  "_variant" "${variant:-}"
+	[ -n "$err" ] && json_add_string "_error" "$err"
+	json_dump
+}
+
+_cache_age() {
+	local ts now
+	[ -s "$CACHE" ] || { echo 999999; return; }
+	ts="$(jsonfilter -q -i "$CACHE" -e '@._timestamp' 2>/dev/null)"
+	[ -n "$ts" ] || { echo 999999; return; }
+	now="$(date +%s)"
+	echo $(( now - ts ))
+}
+
+show_status() {
+	local age
+
+	age="$(_cache_age)"
+	if [ "$age" -lt "$INTERVAL" ]; then
+		cat "$CACHE"
+		return
+	fi
+
+	# Serializacja: rownolegle wywolania nie mnoza zapytan do modemu.
+	{
+		flock -x 9
+
+		age="$(_cache_age)"
+		if [ "$age" -lt "$INTERVAL" ]; then
+			cat "$CACHE"
+		else
+			_refresh > "${CACHE}.new" 2>/dev/null
+			if [ -s "${CACHE}.new" ]; then
+				mv "${CACHE}.new" "$CACHE"
+			else
+				rm -f "${CACHE}.new"
+			fi
+			cat "$CACHE" 2>/dev/null || echo '{"_error":"Brak danych"}'
+		fi
+	} 9>"$LOCK"
+}
+
+# Diagnostyka: wymusza logowanie i mowi, ktory wariant hashowania zadzialal.
+show_probe() {
+	local v ld ok=""
+
+	json_init
+	json_add_string "host" "$HOST"
+
+	ld="$(_get "isTest=false&cmd=LD" | jsonfilter -q -e '@.LD' 2>/dev/null)"
+	json_add_string "ld" "${ld:-}"
+	json_add_int    "ld_length" "${#ld}"
+	json_add_boolean "reachable" "$([ -n "$ld" ] && echo 1 || echo 0)"
+
+	if [ -z "$PASSWORD" ]; then
+		json_add_string "error" "Nie ustawiono hasla do modemu"
+		json_dump
+		return
+	fi
+
+	json_add_array "tried"
+	for v in $VARIANTS; do
+		json_add_string "" "$v"
+	done
+	json_close_array
+
+	for v in $VARIANTS; do
+		if _login "$v"; then
+			ok="$v"
+			break
+		fi
+	done
+
+	if [ -n "$ok" ]; then
+		uci -q set zte-mc888.main.hash_variant="$ok"
+		uci -q commit zte-mc888
+		json_add_string  "variant" "$ok"
+		json_add_boolean "success" 1
+	else
+		json_add_boolean "success" 0
+		json_add_string  "error" "Zaden wariant hashowania nie zadzialal"
+	fi
+
+	json_dump
+}
+
+case "$1" in
+	list)
+		json_init
+		json_add_object "status"
+		json_close_object
+		json_add_object "probe"
+		json_close_object
+		json_dump
+		;;
+	call)
+		case "$2" in
+			status) show_status ;;
+			probe)  show_probe  ;;
+		esac
+		;;
+esac
+
+exit 0
