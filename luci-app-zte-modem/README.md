@@ -171,6 +171,13 @@ Potwierdzone na urządzeniach:
 `base64(hasło)` — czyli wariantem `b64_plain`, który backend ma już na liście i wykrywa
 sam, bez konfiguracji. Cookie sesji nazywa się `stok`.
 
+⚠️ **Wygasła sesja wygląda jak awaria modemu, nie jak brak logowania.** Zapytanie
+zwraca komplet kluczy, tyle że wypełnione są **tylko pola dostępne bez logowania**
+(`model_name`, `network_type`, `network_provider`, `signalbar`, `ppp_status`,
+`modem_main_state`, `wa_inner_version`, `simcard_roam`). Objaw łatwo wziąć za limit
+liczby pól w `multi_data` — sprawdzone: **takiego limitu nie ma**, po ponownym
+zalogowaniu to samo zapytanie o 40 pól zwraca komplet. Sesja MF79U wygasa szybko.
+
 `cr_version` jest puste na obu. **`model_name` to wiarygodny klucz do rozpoznania modelu.**
 
 **Bez logowania** czytają się: `signalbar`, `network_type`, `network_provider`,
@@ -260,6 +267,43 @@ Rozbiór zweryfikowany wobec panelu MC7010, który pokazuje
 
 ⚠️ **Niespójność do zapamiętania:** `lte_pci` (nośna główna) jest **szesnastkowe**,
 ale PCI wewnątrz `lte_multi_ca_scell_info` jest **dziesiętne**.
+
+## Kodowanie identyfikatorów — per POLE, nie per urządzenie
+
+To najbardziej zdradliwa część tego API. Nie ma pola, które ogłaszałoby system liczbowy.
+
+**`cell_id` jest szesnastkowy na wszystkich sprawdzonych modelach.** Dowód dla MF79U,
+który wygląda na dziesiętny: dwie kolejne próbki `0f2a16` i `0f2a1c` po odczytaniu jako
+hex dają **ten sam eNodeB** (`993814 >> 8 == 993820 >> 8 == 3882`) przy różnych
+sektorach (22 i 28), a ECI 993814 trafia w btsearch (ABC1234, Miasto).
+Jako liczby dziesiętne nie miałyby żadnego związku — a `0f2a1c` nie jest nawet liczbą.
+
+**Ale `lte_pci` już nie.** MF79U podaje `205`, co jako hex daje 517 — poza zakresem PCI
+(0–503). Backend rozstrzyga to w `_pci_base` i ogłasza wynik widokowi:
+
+| krok | reguła |
+|---|---|
+| 1 | jest litera `a-f` → **hex** |
+| 2 | jako hex > 503 → to nie może być PCI → **dec** |
+| 3 | `model_name` zaczyna się od `MF` → **dec** |
+| 4 | inaczej → **hex** (zgodnie z serią MC) |
+
+Krok 3 jest potrzebny, bo dla wartości typu `100` — bez liter i w zakresie obu
+interpretacji — sam łańcuch nie rozstrzyga.
+
+### eNodeB liczymy sami
+
+`enodeb_id` **nie jest wiarygodne**: MF79U wstawia tam kopię `cell_id`, więc numer
+komórki udawałby numer stacji. Widok liczy `eNB = ECI >> 8`, `sektor = ECI & 0xff` —
+na MC888/MC7010 wynik zgadza się z tym, co modem podaje sam (`0x21ab417 >> 8 = 0x21ab4`).
+
+### `wan_active_band` potrafi kłamać
+
+MF79U raportuje `LTE BAND 1` zarówno przy EARFCN 1875 (to B3), jak i 9460 (to B28) —
+a zakres B1 to 0–599, więc żadna z tych wartości nie jest B1. Dlatego pasmo nośnej
+głównej wyznaczamy w kolejności: `lte_ca_pcell_band` → `lte_band` → **wyliczenie
+z EARFCN** (tablica `EARFCN_BANDS` wg 3GPP TS 36.101) → dopiero na końcu
+`wan_active_band`. EARFCN jest indeksem fizycznej częstotliwości, więc rozstrzyga.
 
 ### Nośna główna bez agregacji
 

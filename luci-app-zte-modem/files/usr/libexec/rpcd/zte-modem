@@ -179,6 +179,42 @@ _hex2dec() {
 	printf '%d' "0x$1" 2>/dev/null
 }
 
+# W jakim systemie modem podaje PCI?
+#
+# UWAGA: kodowanie jest per POLE, nie per urzadzenie. `cell_id` jest
+# szesnastkowe na wszystkich sprawdzonych modelach - dowod dla MF79U: dwie
+# kolejne probki "0f2a16" i "0f2a1c" po odczytaniu jako hex daja ten sam
+# eNodeB (993814>>8 = 993820>>8 = 3882) przy roznych sektorach (22 i 28),
+# a ECI 993814 trafia w btsearch (ABC1234). Jako liczby dziesietne nie
+# mialyby zadnego sensownego zwiazku, a "0f2a1c" nie jest nawet liczba.
+#
+# Ale PCI juz nie: MF79U podaje "205", co jako hex daje 517 - poza zakresem
+# PCI (0-503). Seria MC podaje hex ("14f", "1e3"). Stad:
+#
+#   1. jest litera a-f      -> hex
+#   2. jako hex > 503       -> to nie moze byc PCI -> dec
+#   3. model z rodziny MF   -> dec (MF79U potwierdzony)
+#   4. inaczej              -> hex (zachowanie zgodne z seria MC)
+#
+# Punkt 3 jest potrzebny, bo dla wartosci typu "100" bez liter i w zakresie
+# obu interpretacji sam lancuch nie rozstrzyga.
+_pci_base() { # $1=lte_pci $2=model_name
+	local p
+
+	case "$1" in
+		*[a-fA-F]*) echo hex; return ;;
+	esac
+
+	p="$(_hex2dec "$1")"
+	[ -n "$p" ] && [ "$p" -gt 503 ] && { echo dec; return; }
+
+	case "$2" in
+		MF*|mf*) echo dec; return ;;
+	esac
+
+	echo hex
+}
+
 _bts_fetch() { # $1 = ecid dziesietnie, $2 = plik cache
 	local resp
 
@@ -236,12 +272,19 @@ _refresh() {
 		return
 	fi
 
-	# --- stacja bazowa ---------------------------------------------------
-	local cid dec f bts_station="" bts_operator="" bts_city="" bts_addr=""
+	# --- identyfikatory i stacja bazowa ----------------------------------
+	local cid pciv model pcibase dec f
+	local bts_station="" bts_operator="" bts_city="" bts_addr=""
 	local bts_lat="" bts_lon=""
 
-	if [ "$BTS_LOOKUP" = "1" ]; then
-		cid="$(printf '%s' "$data" | jsonfilter -q -e '@.cell_id')"
+	cid="$(printf '%s'   "$data" | jsonfilter -q -e '@.cell_id')"
+	pciv="$(printf '%s'  "$data" | jsonfilter -q -e '@.lte_pci')"
+	model="$(printf '%s' "$data" | jsonfilter -q -e '@.model_name')"
+	pcibase="$(_pci_base "$pciv" "$model")"
+
+	# cell_id jest szesnastkowe na wszystkich sprawdzonych modelach (patrz
+	# komentarz przy _pci_base). btsearch szuka po ECI dziesietnym.
+	if [ "$BTS_LOOKUP" = "1" ] && [ -n "$cid" ]; then
 		dec="$(_hex2dec "$cid")"
 		if [ -n "$dec" ]; then
 			f="${BTS_CACHE}.${dec}.json"
@@ -264,6 +307,7 @@ _refresh() {
 	json_add_boolean "_authenticated" "$authed"
 	json_add_boolean "_stale" 0
 	json_add_string  "_variant" "${variant:-}"
+	json_add_string  "_pci_base" "$pcibase"
 	[ -n "$dec" ]          && json_add_string "_cell_dec"     "$dec"
 	[ -n "$bts_station" ]  && json_add_string "_bts_station"  "$bts_station"
 	[ -n "$bts_operator" ] && json_add_string "_bts_operator" "$bts_operator"

@@ -125,35 +125,49 @@ function metric(label, kind, value, unit) {
 	]);
 }
 
-/* Cell ID przychodzi w hex; pokazujemy tez wartosc dziesietna (ECI), bo to nia
- * posluguje sie btsearch i wiekszosc narzedzi.
+/* Przy kodowaniu szesnastkowym pokazujemy obok wartosc dziesietna (ECI), bo to
+ * nia posluguje sie btsearch i wiekszosc narzedzi.
  *
  * Swiadomie BEZ odnosnika: stary glaboki link `szukaj.php?mode=std&search=` nie
  * dziala - btsearch jest dzis SPA i kazdy adres zwraca ten sam szkielet HTML.
  * Identyfikacje masztu robi backend przez /api/v1/search, a wynik pokazuje
  * sekcja "Stacja bazowa" nizej.
- */
-/* PCI modem podaje SZESNASTKOWO - potwierdzone na MC7010, ktory zwrocil
- * `lte_pci: "1e3"` i `nr5g_pci: "3d"`; "1e3" nie jest liczba dziesietna.
- * Na MC888 wartosci ("11", "133") wygladaja na dziesietne, ale to ta sama
- * rodzina firmware'u i to samo pole, a cell_id jest tam hexem potwierdzonym
- * dopasowaniem w btsearch - wiec traktujemy je jednolicie jako hex.
+ *
+ * Kodowanie jest per POLE, nie per urzadzenie: `cell_id` jest szesnastkowe na
+ * wszystkich sprawdzonych modelach, ale PCI juz nie (MF79U podaje dziesietnie).
+ * Rozstrzyga backend i oglasza wynik w `_pci_base`.
  *
  * PCI przyjeto podawac dziesietnie (zakres 0-503), stad taka kolejnosc.
  */
-function pci(hex) {
-	if (!hex) return '–';
-	var dec = parseInt(String(hex), 16);
-	if (isNaN(dec)) return txt(hex);
-	return dec + ' (0x' + String(hex).toLowerCase() + ')';
+function pciHex(st) {
+	return (st && st._pci_base) ? (st._pci_base === 'hex') : true;
 }
 
-function cellId(hex) {
-	if (!hex) return '–';
-	var dec = parseInt(String(hex), 16);
-	if (isNaN(dec)) return txt(hex);
+function pci(v, hex) {
+	if (!v) return '–';
+	if (hex === false) return txt(v);
+	var dec = parseInt(String(v), 16);
+	if (isNaN(dec)) return txt(v);
+	return dec + ' (0x' + String(v).toLowerCase() + ')';
+}
 
-	return hex + ' (' + dec + ')';
+function cellId(v) {
+	if (!v) return '–';
+	var dec = parseInt(String(v), 16);
+	if (isNaN(dec)) return txt(v);
+
+	return v + ' (' + dec + ')';
+}
+
+/* eNodeB wyprowadzamy z ECI (górne bity), zamiast ufac polu `enodeb_id`:
+ * MF79U wstawia tam KOPIE cell_id, wiec pokazywalby numer komorki jako numer
+ * stacji. Na MC888/MC7010 wyliczona wartosc zgadza sie z tym, co modem podaje
+ * sam (0x21ab417 >> 8 = 0x21ab4). Przy okazji widac numer sektora. */
+function enodeb(cid) {
+	var eci = parseInt(String(cid || ''), 16);
+	if (isNaN(eci)) return null;
+	var enb = eci >> 8, sec = eci & 0xff;
+	return enb + ' (0x' + enb.toString(16) + ')  ·  ' + _('sektor') + ' ' + sec;
 }
 
 function infoTable(rows) {
@@ -243,13 +257,45 @@ function ceiling(rb) {
 	return rb * 126 * 6 * 2 / 1000;   /* Mb/s */
 }
 
-/* Pasmo nosnej glownej bywa podane na trzy sposoby, zaleznie od modelu i od tego,
- * czy akurat dziala agregacja: `lte_ca_pcell_band` ("7"), `lte_band` ("7") albo
- * `wan_active_band` ("LTE BAND 7"). Bez agregacji pierwsze bywa puste.
+/* Zakresy DL EARFCN wg 3GPP TS 36.101 - tyle pasm, ile realnie spotykamy w PL/LT.
+ * Sluzy do wyznaczenia pasma, gdy modem go nie podaje ALBO podaje blednie. */
+var EARFCN_BANDS = [
+	[0,     599,   1], [600,   1199,  2], [1200,  1949,  3], [1950,  2399,  4],
+	[2400,  2649,  5], [2750,  3449,  7], [3450,  3799,  8], [5010,  5179, 12],
+	[5180,  5279, 13], [6150,  6449, 20], [8690,  9039, 26], [9210,  9659, 28],
+	[9770,  9869, 32], [37750, 38249, 38], [38650, 39649, 40], [39650, 41589, 41],
+	[41590, 43589, 42]
+];
+
+function bandFromEarfcn(v) {
+	var e = num(v);
+	if (e === null) return null;
+	for (var i = 0; i < EARFCN_BANDS.length; i++)
+		if (e >= EARFCN_BANDS[i][0] && e <= EARFCN_BANDS[i][1])
+			return String(EARFCN_BANDS[i][2]);
+	return null;
+}
+
+function earfcnOf(st) {
+	return st.lte_ca_pcell_freq || st.wan_active_channel || st.lte_ca_pcell_arfcn || '';
+}
+
+/* Pasmo nosnej glownej. Kolejnosc zrodel nie jest przypadkowa:
+ *
+ * `lte_ca_pcell_band` i `lte_band` sa wiarygodne (na MC888/MC7010 zgadzaja sie
+ * z EARFCN-em), ale bez agregacji bywaja puste. Dopiero potem wyliczamy pasmo
+ * z EARFCN-a - i to WYPRZEDZA `wan_active_band`, bo to pole potrafi klamac:
+ * MF79U raportuje "LTE BAND 1" zarowno przy EARFCN 1875 (B3), jak i 9460 (B28),
+ * a zakres B1 to 0-599, wiec zadna z tych wartosci nie jest B1. EARFCN to
+ * indeks fizycznej czestotliwosci, wiec jest rozstrzygajacy.
  */
 function bandOf(st) {
 	if (st.lte_ca_pcell_band) return String(st.lte_ca_pcell_band);
 	if (st.lte_band)          return String(st.lte_band);
+
+	var b = bandFromEarfcn(earfcnOf(st));
+	if (b) return b;
+
 	var m = String(st.wan_active_band || '').match(/(\d+)/);
 	return m ? m[1] : null;
 }
@@ -269,8 +315,11 @@ function bwOf(st) {
 function carriers(st) {
 	var rows = [];
 
-	function hexDec(v) {
+	/* PCI nosnej glownej - w tym samym kodowaniu co reszta identyfikatorow.
+	   (PCI wewnatrz lte_multi_ca_scell_info jest DZIESIETNE niezaleznie od tego.) */
+	function pcellPci(v) {
 		if (!v) return '–';
+		if (!pciHex(st)) return String(v);
 		var d = parseInt(String(v), 16);
 		return isNaN(d) ? String(v) : String(d);
 	}
@@ -281,8 +330,8 @@ function carriers(st) {
 			name:   'PCell',
 			band:   pband ? 'B' + pband : '–',
 			bw:     pbw,
-			earfcn: txt(st.lte_ca_pcell_freq || st.wan_active_channel || st.lte_ca_pcell_arfcn),
-			pci:    hexDec(st.lte_pci)
+			earfcn: txt(earfcnOf(st)),
+			pci:    pcellPci(st.lte_pci)
 		});
 
 	if (st.lte_multi_ca_scell_info) {
@@ -418,6 +467,8 @@ function renderStatus(st) {
 	var hasLte = [st.lte_rsrp, st.lte_rsrq, st.lte_rssi, st.lte_snr]
 		.some(function(v) { return num(v) !== null; });
 
+	var hex = pciHex(st);
+
 	if (hasLte) {
 		out.push(block('LTE', [
 			metric('RSRP', 'rsrp', st.lte_rsrp, 'dBm'),
@@ -435,9 +486,9 @@ function renderStatus(st) {
 		out.push(carriers(st));
 		out.push(infoTable([
 			(!hasCarriers && st.wan_active_band) ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
-			(!hasCarriers && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci)] : null,
+			(!hasCarriers && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci, hex)] : null,
 			[_('Cell ID'),            cellId(st.cell_id)],
-			st.enodeb_id ? [_('eNodeB ID'), cellId(st.enodeb_id)] : null
+			enodeb(st.cell_id) ? [_('eNodeB ID'), enodeb(st.cell_id)] : null
 		]));
 	}
 
@@ -454,7 +505,7 @@ function renderStatus(st) {
 		out.push(infoTable([
 			[_('Pasmo'),    txt(st.nr5g_action_band)],
 			[_('Kanał'),    txt(st.nr5g_action_channel)],
-			[_('PCI'),      pci(st.nr5g_pci)],
+			[_('PCI'),      pci(st.nr5g_pci, hex)],
 			st.Z5g_CELL_ID ? [_('Cell ID'), cellId(st.Z5g_CELL_ID)] : null
 		]));
 	}
