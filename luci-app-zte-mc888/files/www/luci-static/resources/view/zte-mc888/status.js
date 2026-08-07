@@ -341,10 +341,18 @@ function renderStatus(st) {
 			metric('RSSI', 'rssi', st.lte_rssi, 'dBm'),
 			metric('SNR',  'sinr', st.lte_snr,  'dB')
 		]));
+		/* Tabela nosnych podaje juz pasmo, szerokosc, EARFCN i PCI kazdej nosnej,
+		   wiec nie powtarzamy tu "Aktywne pasmo" ani PCI nosnej glownej.
+		   wan_active_band zostaje wylacznie jako zapas dla modemow, ktore w ogole
+		   nie raportuja pol CA (spodziewane w serii MF) - inaczej informacja
+		   o pasmie zniknelaby calkiem. */
+		var hasCA = !!(st.lte_ca_pcell_band || st.lte_multi_ca_scell_info ||
+		               st.lte_ca_scell_band);
+
 		out.push(carriers(st));
 		out.push(infoTable([
-			st.wan_active_band ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
-			[_('PCI'),                pci(st.lte_pci)],
+			(!hasCA && st.wan_active_band) ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
+			(!hasCA && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci)] : null,
 			[_('Cell ID'),            cellId(st.cell_id)],
 			st.enodeb_id ? [_('eNodeB ID'), cellId(st.enodeb_id)] : null
 		]));
