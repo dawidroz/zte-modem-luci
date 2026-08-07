@@ -1,32 +1,43 @@
-# zte — aplikacje LuCI do monitoringu modemów ZTE
+# zte — monitoring modemów ZTE w LuCI
 
-Moduły LuCI dla OpenWrt, które czytają parametry modemu ZTE **po HTTP przez API
-`goform`** — bez `comgt`/AT, bez `/dev/ttyUSB*`. Docelowo dla modemów sieciowych
-(CPE po Ethernecie) stanowiących łącze WAN routera.
+Pakiety dla OpenWrt, które czytają parametry modemu ZTE **po HTTP przez API `goform`** —
+bez `comgt`/AT, bez `/dev/ttyUSB*`. Dla modemów sieciowych (CPE po Ethernecie)
+stanowiących łącze WAN routera.
 
-## Zawartość
+To dlatego, że `modemdata` / `modemband` / `sms-tool` z feedu eko.one.pl **nie mają tu
+zastosowania**: zależą od `comgt`/AT i wymagają `/dev/ttyUSB*` albo `/dev/cdc-wdm*`,
+których przy CPE po Ethernecie po prostu nie ma.
 
-| katalog | opis |
+## Pakiety
+
+| katalog | rola |
 |---|---|
-| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja light** — zakres zamknięty |
+| [`zte-modem-core/`](zte-modem-core/) | **backend** — obiekt ubus `zte-modem`, bez interfejsu |
+| [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 4 zakładki, tylko odczyt, zero zapisu do flasha |
+| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — historia sygnału i wykresy, *planowana* |
+| [`docs/`](docs/) | dokumentacja protokołu, wspólna dla obu wersji |
 
-### Wersja light — `luci-app-zte-modem`
+Widoki dzielą całą logikę odczytu, dlatego backend jest osobnym pakietem — a nie
+kopiowany. Obie wersje używają tych samych identyfikatorów runtime
+(`/etc/config/zte-modem`, ubus `zte-modem`, menu `admin/services/zte-modem`), więc
+**nie instaluje się ich obok siebie**; sufiks `-light` dotyczy tylko nazwy pakietu.
 
-Cztery zakładki, tylko odczyt, **zero zapisu do pamięci trwałej**:
+## Instalacja
 
-- **Status** — RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją,
-  łączna szerokość, sufit teoretyczny, identyfikacja stacji bazowej (btsearch.pl)
-- **Transfer** — liczniki miesięczne i prędkość chwilowa z modemu
-- **Modem** — model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN
-- **Konfiguracja** — adres modemu, hasło, interwał, test logowania
+```sh
+./scripts/deploy.sh                          # core + light, root@192.168.0.1
+./scripts/deploy.sh root@10.0.0.1            # inny cel
+./scripts/deploy.sh --pkg zte-modem-core     # tylko wybrany pakiet
+./scripts/deploy.sh --dry-run                # podglad bez zmian
+```
 
-Szczegóły API, warianty logowania i **pułapki poszczególnych firmware'ów**:
-[`luci-app-zte-modem/README.md`](luci-app-zte-modem/README.md).
+Skrypt jest idempotentny i **nie nadpisuje istniejącego `/etc/config/zte-modem`**, bo
+trzymane jest tam hasło do modemu. Po wgraniu restartuje `rpcd` i sprawdza, czy obiekt
+ubus się zarejestrował. Hasła nie ma w repozytorium — plik w `files/` ma pustą wartość,
+ustawia się je w LuCI (**Services → Modem ZTE → Konfiguracja**).
 
-### Wersja rozbudowana — planowana
-
-Statystyki, historia sygnału i wykresy trafią do **osobnego modułu pod własną nazwą**.
-Świadomie nie dokładamy ich do wersji light, żeby nie wciągać jej w zapis do flasha.
+Zakres modułów to **tylko odczyt**: żadnego restartu, SMS-ów ani blokowania pasm. Dzięki
+temu niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć routera od sieci.
 
 ## Sprawdzone modemy
 
@@ -37,22 +48,30 @@ Statystyki, historia sygnału i wykresy trafią do **osobnego modułu pod własn
 | MF297D | `sha256_sha256` | 64 hex | LTE, mimo „MF" w nazwie loguje się jak seria MC |
 | MF79U | `b64_plain` | **puste** | LTE, dongle USB, brak wyzwania |
 
-⚠️ **Nazwa modelu nie wyznacza rodziny** — MF297D zachowuje się jak seria MC.
-Reguły opierać na zachowaniu, nie na prefiksie nazwy.
+⚠️ **Nazwa modelu nie wyznacza rodziny.** Reguły opierać na zachowaniu, nie na prefiksie.
 
-## Wdrożenie
+Testowane na OpenWrt 24.10.2 (MikroTik RB5009, Cudy WR3000S, Zyxel), z modemem jako
+bramą domyślną routera.
 
-```sh
-cd luci-app-zte-modem
-./deploy.sh root@<adres-routera>      # --dry-run pokazuje, co by zrobił
-```
+## Dokumentacja
 
-Skrypt jest idempotentny i **nie nadpisuje istniejącego `/etc/config/zte-modem`**,
-bo trzymane jest tam hasło do modemu. Hasła nie ma w repozytorium.
+| dokument | zawartość |
+|---|---|
+| [`docs/goform-api.md`](docs/goform-api.md) | endpointy, warianty logowania, wykrywanie sesji, zależności |
+| [`docs/modele.md`](docs/modele.md) | profile pól per model, tożsamość i SIM, agregacja nośnych |
+| [`docs/kodowanie-pol.md`](docs/kodowanie-pol.md) | hex vs. dec per pole, eNodeB, pasmo z EARFCN |
+| [`docs/btsearch.md`](docs/btsearch.md) | rozpoznawanie stacji bazowej, cache, wyłącznik |
+| [`docs/pulapki.md`](docs/pulapki.md) | skrót wszystkich pułapek z odnośnikami |
 
-## Pochodzenie
+Jeśli zamierzasz dodać obsługę kolejnego modelu — zacznij od
+[`docs/pulapki.md`](docs/pulapki.md) i procedury profilowania na końcu
+[`docs/modele.md`](docs/modele.md).
 
-Wydzielone z prywatnego repozytorium `horowe` z **zachowaniem pełnej historii**
-(20 commitów, od pierwszej wersji modułu). Wcześniejsze commity używają starej
-nazwy katalogu `luci-app-zte-mc888` — moduł został przemianowany, gdy przestał
-dotyczyć jednego modelu.
+## Uwaga o danych
+
+Identyfikatory komórek i stacji w dokumentacji są **zanonimizowane**, ale wewnętrznie
+spójne — arytmetyka `ECI >> 8` i test zakresu 28 bitów zgadzają się i można na nich
+sprawdzić implementację.
+
+Moduł domyślnie wysyła Cell ID do btsearch.pl w celu rozpoznania masztu. Wyłącznik:
+`uci set zte-modem.main.bts_lookup='0'`.

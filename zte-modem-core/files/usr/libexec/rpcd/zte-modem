@@ -196,11 +196,12 @@ _hex2dec() {
 # Kodowanie rozni sie MIEDZY MODELAMI i MIEDZY POLAMI - nie ma pola, ktore by
 # je oglaszalo. Rozstrzygamy zakresem: ECI ma 28 bitow (max 268435455).
 #
-#   MC888   "21ab417"  -> litera        -> hex (0x21ab417 = 35304471, trafia w btsearch)
+# Przyklady zanonimizowane, ale arytmetycznie spojne (patrz docs/kodowanie-pol.md):
+#
+#   MC888   "21ab417"  -> litera        -> hex (0x21ab417 = 35304471)
 #   MF79U   "0f2a1c"   -> litera        -> hex (993820; probka "0f2a16" daje ten sam
-#                                          eNodeB 3882, a ECI 993814 trafia w btsearch)
+#                                          eNodeB 3882, przy sektorach 28 i 22)
 #   MF297D  "35304501" -> hex = 892355841 > 268435455, czyli NIE ECI -> dec
-#                                         (35304501 trafia w btsearch: ABC5678)
 #
 # Ograniczenie: krotka wartosc bez liter, miesci sie w zakresie w obu
 # interpretacjach (np. "1234567") - wygrywa hex. Dla 8-cyfrowych ECI
