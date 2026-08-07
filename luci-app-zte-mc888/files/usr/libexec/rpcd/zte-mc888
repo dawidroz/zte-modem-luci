@@ -31,11 +31,15 @@ REFERER="http://${HOST}/index.html"
 # zeby kolejne logowania nie zgadywaly od nowa.
 VARIANTS="sha256_b64 sha256_sha256 b64_plain md5_plain"
 
-F="network_type,network_provider,signalbar,wan_ipaddr,ppp_status,modem_main_state"
+F="model_name,network_type,network_provider,signalbar,wan_ipaddr,ppp_status,modem_main_state"
 F="${F},wa_inner_version,cr_version,simcard_roam,ussd_write_flag"
 F="${F},lte_rsrp,lte_rsrq,lte_rssi,lte_snr,lte_pci,cell_id"
 F="${F},lte_ca_pcell_band,lte_ca_pcell_bandwidth,lte_ca_scell_band"
 F="${F},lte_ca_scell_bandwidth,lte_ca_pcell_arfcn,wan_active_band"
+# Pelna agregacja: "idx,PCI,?,pasmo,EARFCN,szerokosc" rozdzielone ';'.
+# lte_ca_scell_* pokazuje tylko PIERWSZA nosna dodatkowa, a lte_ca_pcell_arfcn
+# bywa puste - EARFCN PCell siedzi w lte_ca_pcell_freq.
+F="${F},lte_multi_ca_scell_info,lte_ca_pcell_freq,enodeb_id,lte_band,wan_active_channel"
 F="${F},Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_CELL_ID,nr5g_pci,nr5g_action_band,nr5g_action_channel"
 F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
 FIELDS="$F"

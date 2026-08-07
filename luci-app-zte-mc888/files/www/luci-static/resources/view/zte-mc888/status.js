@@ -195,6 +195,80 @@ function station(st) {
 	];
 }
 
+/* Tabela agregacji nosnych (CA).
+ *
+ * PCell: lte_ca_pcell_band / _bandwidth, EARFCN z lte_ca_pcell_freq
+ *        (lte_ca_pcell_arfcn bywa zawsze puste - na MC7010 i MC888 wlasnie tak jest).
+ * SCell: lte_multi_ca_scell_info - nosne rozdzielone ';', kazda to
+ *        "idx,PCI,?,pasmo,EARFCN,szerokosc".
+ *
+ * Ukladu pol nie zgadywalem: dla MC888 pierwsza nosna dodatkowa ma PCI 334
+ * i EARFCN 3025, a btsearch ma dla tej samej stacji komorke dokladnie
+ * z `pci=334, earfcn=3025`. Zgadza sie tez zakres EARFCN z numerem pasma
+ * (1348 -> B3 1200-1949; 3050 -> B7 2750-3449).
+ *
+ * UWAGA na niespojnosc: `lte_pci` (PCell) jest SZESNASTKOWE, ale PCI w
+ * lte_multi_ca_scell_info jest DZIESIETNE.
+ *
+ * lte_ca_scell_band/_bandwidth pokazuje tylko PIERWSZA nosna dodatkowa -
+ * sluzy wylacznie jako zapas dla firmware'ow bez lte_multi_ca_scell_info.
+ */
+function carriers(st) {
+	var rows = [];
+
+	function hexDec(v) {
+		if (!v) return '–';
+		var d = parseInt(String(v), 16);
+		return isNaN(d) ? String(v) : String(d);
+	}
+
+	if (st.lte_ca_pcell_band)
+		rows.push(['PCell', 'B' + st.lte_ca_pcell_band,
+			st.lte_ca_pcell_bandwidth ? st.lte_ca_pcell_bandwidth + ' MHz' : '–',
+			txt(st.lte_ca_pcell_freq || st.wan_active_channel || st.lte_ca_pcell_arfcn),
+			hexDec(st.lte_pci)]);
+
+	if (st.lte_multi_ca_scell_info) {
+		String(st.lte_multi_ca_scell_info).split(';').forEach(function(part) {
+			var f = part.split(',');
+			if (f.length < 6) return;
+			rows.push(['SCC' + f[0], 'B' + f[3], f[5] + ' MHz', f[4], f[1]]);
+		});
+	} else if (st.lte_ca_scell_band) {
+		rows.push(['SCC1', 'B' + st.lte_ca_scell_band,
+			st.lte_ca_scell_bandwidth ? st.lte_ca_scell_bandwidth + ' MHz' : '–',
+			'–', '–']);
+	}
+
+	if (!rows.length)
+		return E('div', {});
+
+	var total = rows.reduce(function(a, r) {
+		var n = parseFloat(r[2]);
+		return a + (isNaN(n) ? 0 : n);
+	}, 0);
+
+	var head = E('tr', { 'class': 'tr table-titles' },
+		[_('Nośna'), _('Pasmo'), _('Szerokość'), 'EARFCN', 'PCI'].map(function(h) {
+			return E('th', { 'class': 'th left' }, h);
+		}));
+
+	var body = rows.map(function(r) {
+		return E('tr', { 'class': 'tr' }, r.map(function(c) {
+			return E('td', { 'class': 'td left' }, String(c));
+		}));
+	});
+
+	return E('div', {}, [
+		E('table', { 'class': 'table', 'style': 'margin-top:.5em' }, [head].concat(body)),
+		total > 0
+			? E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' },
+				_('Łączna szerokość') + ': ' + total.toFixed(1) + ' MHz  ·  ' +
+				rows.length + '×CA')
+			: ''
+	]);
+}
+
 function block(title, children) {
 	return E('div', { 'style': 'margin-bottom:1.2em' }, [
 		E('h4', { 'style': 'margin:.3em 0 .5em' }, title),
@@ -267,15 +341,12 @@ function renderStatus(st) {
 			metric('RSSI', 'rssi', st.lte_rssi, 'dBm'),
 			metric('SNR',  'sinr', st.lte_snr,  'dB')
 		]));
+		out.push(carriers(st));
 		out.push(infoTable([
 			st.wan_active_band ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
-			[_('Pasmo (PCell)'),      txt(st.lte_ca_pcell_band)],
-			[_('Szerokość (PCell)'),  txt(st.lte_ca_pcell_bandwidth) + ' MHz'],
-			st.lte_ca_scell_band ? [_('Pasmo (SCell, CA)'), txt(st.lte_ca_scell_band)] : null,
-			st.lte_ca_scell_bandwidth ? [_('Szerokość (SCell)'), txt(st.lte_ca_scell_bandwidth) + ' MHz'] : null,
-			st.lte_ca_pcell_arfcn ? [_('EARFCN'), txt(st.lte_ca_pcell_arfcn)] : null,
 			[_('PCI'),                pci(st.lte_pci)],
-			[_('Cell ID'),            cellId(st.cell_id)]
+			[_('Cell ID'),            cellId(st.cell_id)],
+			st.enodeb_id ? [_('eNodeB ID'), cellId(st.enodeb_id)] : null
 		]));
 	}
 
@@ -324,8 +395,9 @@ function figure(label, value, sub) {
 
 function footer(st) {
 	var when = st._timestamp ? new Date(st._timestamp * 1000).toLocaleTimeString() : '–';
+	/* Jedna aplikacja obsluguje rozne modele - warto widziec, ktory to. */
 	return E('div', { 'style': 'margin-top:1em;font-size:.85em;opacity:.65' },
-		_('Modem') + ': ' + txt(st._host) +
+		(st.model_name ? st.model_name + ' · ' : '') + txt(st._host) +
 		' · ' + _('firmware') + ': ' + txt(st.wa_inner_version) +
 		' · ' + _('odczyt') + ': ' + when);
 }
@@ -400,7 +472,7 @@ return view.extend({
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
 
-		var m = new form.Map('zte-mc888', _('ZTE MC888'),
+		var m = new form.Map('zte-mc888', _('Modem ZTE'),
 			_('Monitoring sygnału modemu 5G stanowiącego łącze WAN tego routera.'));
 
 		/* Przy m.tabbed kazda sekcja = osobna zakladka. data-tab bierze sie z

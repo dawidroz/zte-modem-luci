@@ -22,7 +22,7 @@ niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć od siec
 Skrypt jest idempotentny i **nie nadpisuje istniejącego `/etc/config/zte-mc888`** (trzyma
 hasło). Po wgraniu restartuje `rpcd` i sprawdza, czy obiekt ubus się zarejestrował.
 
-Hasło ustawia się w LuCI: **Services → ZTE MC888 → Konfiguracja**. Do repozytorium
+Hasło ustawia się w LuCI: **Services → Modem ZTE → Konfiguracja**. Do repozytorium
 nie trafia — plik w `files/` ma pustą wartość.
 
 ## Architektura
@@ -192,3 +192,28 @@ miała pięć niezależnych błędów:
 ## Powiązane
 
 `wdrozenie-roaming-wifi-r2.md` — opis lokalizacji R2, AP Controller i topologii.
+
+## Agregacja nośnych (CA)
+
+`lte_ca_scell_band` / `_bandwidth` pokazuje **tylko pierwszą** nośną dodatkową, a
+`lte_ca_pcell_arfcn` bywa zawsze puste. Pełna agregacja siedzi w
+**`lte_multi_ca_scell_info`**, a EARFCN nośnej głównej w **`lte_ca_pcell_freq`**:
+
+```
+lte_multi_ca_scell_info = "1,334,2,7,3025,15.0;2,212,2,8,3764,5.0"
+                           │  │  │ │  │    └ szerokość [MHz]
+                           │  │  │ │  └────── EARFCN
+                           │  │  │ └───────── pasmo
+                           │  │  └─────────── ? (2 na MC888, 1 na MC7010)
+                           │  └────────────── PCI (dziesiętnie!)
+                           └───────────────── indeks nośnej
+```
+
+Układ nie jest zgadnięty: dla MC888 pierwsza nośna dodatkowa ma PCI 334 i EARFCN 3025,
+a btsearch ma dla tej samej stacji komórkę dokładnie z `pci=334, earfcn=3025`. Zgadzają
+się też zakresy EARFCN z numerami pasm (1348 → B3 1200–1949; 3050 → B7 2750–3449).
+Rozbiór zweryfikowany wobec panelu MC7010, który pokazuje
+`10.0MHz@800(B20) + 20.0MHz@1800(B3) + 20.0MHz@2600(B7)`.
+
+⚠️ **Niespójność do zapamiętania:** `lte_pci` (nośna główna) jest **szesnastkowe**,
+ale PCI wewnątrz `lte_multi_ca_scell_info` jest **dziesiętne**.

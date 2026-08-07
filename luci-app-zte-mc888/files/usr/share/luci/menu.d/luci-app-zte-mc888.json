@@ -1,6 +1,6 @@
 {
 	"admin/services/zte-mc888": {
-		"title": "ZTE MC888",
+		"title": "Modem ZTE",
 		"order": 65,
 		"action": {
 			"type": "view",
