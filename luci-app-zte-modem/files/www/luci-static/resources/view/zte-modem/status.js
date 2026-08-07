@@ -6,8 +6,8 @@
 'require ui';
 'require uci';
 
-var callStatus = rpc.declare({ object: 'zte-mc888', method: 'status' });
-var callProbe  = rpc.declare({ object: 'zte-mc888', method: 'probe'  });
+var callStatus = rpc.declare({ object: 'zte-modem', method: 'status' });
+var callProbe  = rpc.declare({ object: 'zte-modem', method: 'probe'  });
 
 var COLORS = { good: '#4caf50', ok: '#ff9800', poor: '#e53935' };
 
@@ -447,14 +447,14 @@ function renderTransfer(st) {
 return view.extend({
 	load: function() {
 		return Promise.all([
-			uci.load('zte-mc888'),
+			uci.load('zte-modem'),
 			callStatus().catch(function() { return {}; })
 		]);
 	},
 
 	render: function(data) {
 		var st = data[1] || {};
-		var interval = parseInt(uci.get('zte-mc888', 'main', 'refresh_interval')) || 10;
+		var interval = parseInt(uci.get('zte-modem', 'main', 'refresh_interval')) || 10;
 
 		/* Kazda zakladka ma wlasny panel; poller podmienia oba naraz z jednego odczytu. */
 		var panels = {
@@ -480,7 +480,7 @@ return view.extend({
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
 
-		var m = new form.Map('zte-mc888', _('Modem ZTE'),
+		var m = new form.Map('zte-modem', _('Modem ZTE'),
 			_('Monitoring sygnału modemu 5G stanowiącego łącze WAN tego routera.'));
 
 		/* Przy m.tabbed kazda sekcja = osobna zakladka. data-tab bierze sie z
@@ -509,7 +509,7 @@ return view.extend({
 		m.section(panelTab('transfer', _('Transfer')), 'main', 'transfer');
 
 		/* --- zakladka 3: Konfiguracja ------------------------------------- */
-		var s = m.section(form.NamedSection, 'main', 'zte-mc888', _('Konfiguracja'));
+		var s = m.section(form.NamedSection, 'main', 'zte-modem', _('Konfiguracja'));
 
 		/* Tytul sekcji jest juz etykieta zakladki - nie powtarzaj go w <h3>. */
 		s.renderContents = function() {
@@ -526,7 +526,7 @@ return view.extend({
 		};
 
 		var o = s.option(form.Value, 'host', _('Adres modemu'),
-			_('Adres panelu MC888 — <b>nie</b> adres tego routera.'));
+			_('Adres panelu modemu — <b>nie</b> adres tego routera.'));
 		o.datatype = 'ipaddr';
 		o.placeholder = '192.168.32.1';
 		o.rmempty = false;
@@ -555,7 +555,7 @@ return view.extend({
 		o = s.option(form.DummyValue, '_variant', _('Wariant logowania'),
 			_('Wykrywany automatycznie przy pierwszym udanym logowaniu.'));
 		o.cfgvalue = function() {
-			return uci.get('zte-mc888', 'main', 'hash_variant') || _('jeszcze nie wykryto');
+			return uci.get('zte-modem', 'main', 'hash_variant') || _('jeszcze nie wykryto');
 		};
 
 		o = s.option(form.Button, '_probe', _('Test połączenia'),

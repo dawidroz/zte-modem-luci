@@ -1,0 +1,14 @@
+{
+	"luci-app-zte-modem": {
+		"description": "Grant access to ZTE modem monitoring",
+		"read": {
+			"ubus": {
+				"zte-modem": [ "status", "probe" ]
+			},
+			"uci": [ "zte-modem" ]
+		},
+		"write": {
+			"uci": [ "zte-modem" ]
+		}
+	}
+}

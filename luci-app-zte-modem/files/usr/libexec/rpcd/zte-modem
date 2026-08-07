@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Backend rpcd dla monitoringu modemu ZTE MC888.
+# Backend rpcd dla monitoringu modemow ZTE (MC888, MC7010, ...).
 # Rozmawia z modemem po HTTP (goform), zwraca JSON dla widoku LuCI.
 #
 # Zalozenia:
@@ -11,19 +11,19 @@
 
 . /usr/share/libubox/jshn.sh
 
-CACHE="/tmp/zte-mc888.json"
-COOKIE="/tmp/zte-mc888.cookie"
-LOCK="/tmp/zte-mc888.lock"
-BTS_CACHE="/tmp/zte-mc888.bts"
+CACHE="/tmp/zte-modem.json"
+COOKIE="/tmp/zte-modem.cookie"
+LOCK="/tmp/zte-modem.lock"
+BTS_CACHE="/tmp/zte-modem.bts"
 
 BTS_API="https://btsearch.pl/api/v1/search"
-BTS_LOOKUP="$(uci -q get zte-mc888.main.bts_lookup)"; [ -n "$BTS_LOOKUP" ] || BTS_LOOKUP=1
+BTS_LOOKUP="$(uci -q get zte-modem.main.bts_lookup)"; [ -n "$BTS_LOOKUP" ] || BTS_LOOKUP=1
 
-HOST="$(uci -q get zte-mc888.main.host)";                 [ -n "$HOST" ] || HOST="192.168.32.1"
-PASSWORD="$(uci -q get zte-mc888.main.password)"
-INTERVAL="$(uci -q get zte-mc888.main.refresh_interval)"; [ -n "$INTERVAL" ] || INTERVAL=10
-TIMEOUT="$(uci -q get zte-mc888.main.timeout)";           [ -n "$TIMEOUT" ] || TIMEOUT=6
-VARIANT="$(uci -q get zte-mc888.main.hash_variant)"
+HOST="$(uci -q get zte-modem.main.host)";                 [ -n "$HOST" ] || HOST="192.168.32.1"
+PASSWORD="$(uci -q get zte-modem.main.password)"
+INTERVAL="$(uci -q get zte-modem.main.refresh_interval)"; [ -n "$INTERVAL" ] || INTERVAL=10
+TIMEOUT="$(uci -q get zte-modem.main.timeout)";           [ -n "$TIMEOUT" ] || TIMEOUT=6
+VARIANT="$(uci -q get zte-modem.main.hash_variant)"
 
 REFERER="http://${HOST}/index.html"
 
@@ -125,8 +125,8 @@ _ensure_session() {
 	for v in ${VARIANT:-$VARIANTS}; do
 		if _login "$v"; then
 			if [ "$v" != "$VARIANT" ]; then
-				uci -q set zte-mc888.main.hash_variant="$v"
-				uci -q commit zte-mc888
+				uci -q set zte-modem.main.hash_variant="$v"
+				uci -q commit zte-modem
 			fi
 			echo "$v"
 			return 0
@@ -138,8 +138,8 @@ _ensure_session() {
 		for v in $VARIANTS; do
 			[ "$v" = "$VARIANT" ] && continue
 			if _login "$v"; then
-				uci -q set zte-mc888.main.hash_variant="$v"
-				uci -q commit zte-mc888
+				uci -q set zte-modem.main.hash_variant="$v"
+				uci -q commit zte-modem
 				echo "$v"
 				return 0
 			fi
@@ -292,7 +292,7 @@ show_status() {
 			cat "$CACHE"
 		else
 			# Bez 2>/dev/null - stderr ma byc widoczny przy diagnostyce
-			# (`sh -x /usr/libexec/rpcd/zte-mc888 call status`).
+			# (`sh -x /usr/libexec/rpcd/zte-modem call status`).
 			_refresh > "${CACHE}.new"
 			if [ -s "${CACHE}.new" ]; then
 				mv "${CACHE}.new" "$CACHE"
@@ -336,8 +336,8 @@ show_probe() {
 	done
 
 	if [ -n "$ok" ]; then
-		uci -q set zte-mc888.main.hash_variant="$ok"
-		uci -q commit zte-mc888
+		uci -q set zte-modem.main.hash_variant="$ok"
+		uci -q commit zte-modem
 		json_add_string  "variant" "$ok"
 		json_add_boolean "success" 1
 	else

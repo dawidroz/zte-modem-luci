@@ -1,4 +1,4 @@
-config zte-mc888 'main'
+config zte-modem 'main'
 	# Adres modemu. UWAGA: to NIE jest adres routera, na ktorym stoi ten modul.
 	option host '192.168.32.1'
 	# Haslo administratora modemu. Puste = uzupelnij w LuCI (nie trzymamy go w repo).

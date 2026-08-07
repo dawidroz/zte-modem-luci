@@ -1,0 +1,14 @@
+{
+	"admin/services/zte-modem": {
+		"title": "Modem ZTE",
+		"order": 65,
+		"action": {
+			"type": "view",
+			"path": "zte-modem/status"
+		},
+		"depends": {
+			"acl": [ "luci-app-zte-modem" ],
+			"uci": { "zte-modem": true }
+		}
+	}
+}

@@ -1,12 +1,18 @@
-# luci-app-zte-mc888 — monitoring modemu ZTE MC888 w LuCI
+# luci-app-zte-modem — monitoring modemów ZTE (MC888, MC7010, …) w LuCI
 
-Moduł LuCI pokazujący na żywo parametry sygnału modemu **ZTE MC888**, który stanowi łącze
-WAN dla routera R2 (MikroTik RB5009 z OpenWrt 24.10.2, `192.168.0.1`).
+Moduł LuCI pokazujący na żywo parametry sygnału modemu ZTE stanowiącego łącze WAN routera.
 
-**Modem stoi pod `192.168.32.1`** — to brama domyślna R2 na interfejsie `p8`. Jest to
+Wdrożenia:
+
+| Router | Modem | Adres modemu |
+|---|---|---|
+| R2 — MikroTik RB5009, OpenWrt 24.10.2 (`192.168.0.1`) | **MC888** | `192.168.32.1` |
+| Cudy WR3000S, OpenWrt 24.10.2 (`192.168.10.1`) | **MC7010** | `192.168.8.1` |
+
+W obu przypadkach modem jest **bramą domyślną routera**. To
 samodzielny CPE po Ethernecie, więc `modemdata`/`modemband`/`sms-tool` z feedu eko.one.pl
 **nie mają zastosowania** (zależą od `comgt`/AT i wymagają `/dev/ttyUSB*` albo
-`/dev/cdc-wdm*`, których na R2 nie ma). Komunikacja idzie po HTTP przez `goform`.
+`/dev/cdc-wdm*`, których na tych routerach nie ma). Komunikacja idzie po HTTP przez `goform`.
 
 Zakres: **tylko odczyt**. Żadnego restartu, SMS-ów ani blokowania pasm — dzięki temu
 niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć od sieci.
@@ -19,7 +25,7 @@ niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć od siec
 ./deploy.sh root@10.0.0.1   # inny cel
 ```
 
-Skrypt jest idempotentny i **nie nadpisuje istniejącego `/etc/config/zte-mc888`** (trzyma
+Skrypt jest idempotentny i **nie nadpisuje istniejącego `/etc/config/zte-modem`** (trzyma
 hasło). Po wgraniu restartuje `rpcd` i sprawdza, czy obiekt ubus się zarejestrował.
 
 Hasło ustawia się w LuCI: **Services → Modem ZTE → Konfiguracja**. Do repozytorium
@@ -31,11 +37,11 @@ Wzorzec jak `luci-app-apcontroller`: widok w JS + backend w `rpcd`. Świadomie *
 Lua/CBI — w LuCI 24.10 wymagałoby to `luci-compat`, którego na R2 nie ma.
 
 ```
-files/etc/config/zte-mc888                                UCI: host, hasło, interwał
-files/usr/libexec/rpcd/zte-mc888                          backend, obiekt ubus zte-mc888
-files/usr/share/rpcd/acl.d/luci-app-zte-mc888.json        ACL
-files/usr/share/luci/menu.d/luci-app-zte-mc888.json       wpis menu (admin/services)
-files/www/luci-static/resources/view/zte-mc888/status.js  widok: zakładki Status i Konfiguracja
+files/etc/config/zte-modem                                UCI: host, hasło, interwał
+files/usr/libexec/rpcd/zte-modem                          backend, obiekt ubus zte-modem
+files/usr/share/rpcd/acl.d/luci-app-zte-modem.json        ACL
+files/usr/share/luci/menu.d/luci-app-zte-modem.json       wpis menu (admin/services)
+files/www/luci-static/resources/view/zte-modem/status.js  widok: zakładki Status i Konfiguracja
 ```
 
 Strona ma trzy zakładki, zrobione wbudowanym mechanizmem `form.Map` (`m.tabbed = true`),
@@ -44,7 +50,7 @@ tak samo jak apcontroller. Przy `m.tabbed` **każda sekcja mapy staje się osobn
 **obie sekcje muszą mieć różny `sectiontype`**, inaczej `ui.tabs.initTabGroup()` skleja je
 w jedną. Zakładki Status i Transfer to własne podklasy `form.NamedSection` z nadpisanym
 `render()` (sectiontype `status` / `transfer`), konfiguracja siedzi w zwykłej sekcji
-(sectiontype `zte-mc888`).
+(sectiontype `zte-modem`).
 
 ### Prezentacja sygnału
 
@@ -94,7 +100,7 @@ latitude,longitude}` oraz listę komórek z `ecid` / `enbid` / `clid` / `earfcn`
 > wyglądają na fallback do wyszukiwania tekstowego po `station_id` i zwracają przypadkowe
 > stacje. Trafienie warto potwierdzić po `ecid` w zwróconych komórkach.
 
-Backend **cache'uje odpowiedź w tmpfs pod numerem komórki** (`/tmp/zte-mc888.bts.<dec>.json`)
+Backend **cache'uje odpowiedź w tmpfs pod numerem komórki** (`/tmp/zte-modem.bts.<dec>.json`)
 — maszt zmienia się rzadko, więc to jedno zapytanie na zmianę komórki, nie przy każdym
 odświeżeniu. Ciepły odczyt ~0,15 s, zimny ~0,46 s. Cache jest przycinany do 20 ostatnich
 komórek. Nietrafione zapytanie **nie jest cache'owane** — spróbuje ponownie.
@@ -134,7 +140,14 @@ GET /goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd=pole1,pole2,…
 
 Wszystkie zapytania wymagają nagłówka `Referer: http://<modem>/index.html`.
 
-Potwierdzone na urządzeniu: `wa_inner_version = BD_STDMC888V1.0.0B04`, `cr_version` puste.
+Potwierdzone na urządzeniach:
+
+| model | `model_name` | `wa_inner_version` | `network_type` |
+|---|---|---|---|
+| MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | `ENDC` |
+| MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | `LTE-NSA` |
+
+`cr_version` jest puste na obu. **`model_name` to wiarygodny klucz do rozpoznania modelu.**
 
 **Bez logowania** czytają się: `signalbar`, `network_type`, `network_provider`,
 `ppp_status`, `modem_main_state`, `wa_inner_version`, `simcard_roam`.
@@ -144,40 +157,40 @@ Potwierdzone na urządzeniu: `wa_inner_version = BD_STDMC888V1.0.0B04`, `cr_vers
 ### Warianty hashowania hasła
 
 Firmware ZTE różnią się algorytmem, więc backend próbuje po kolei i **zapamiętuje
-działający** w `zte-mc888.main.hash_variant`:
+działający** w `zte-modem.main.hash_variant`:
 
 | wariant | wzór | |
 |---|---|---|
 | `sha256_b64` | `SHA256(base64(hasło) + LD)` wielkimi literami | |
-| `sha256_sha256` | `SHA256(SHA256(hasło) + LD)` wielkimi literami | ✅ **ten działa na `BD_STDMC888V1.0.0B04`** |
+| `sha256_sha256` | `SHA256(SHA256(hasło) + LD)` wielkimi literami | ✅ **działa na MC888 i MC7010** |
 | `b64_plain` | samo `base64(hasło)` (starsze firmware) | |
 | `md5_plain` | `MD5(hasło + LD)` | |
 
-Potwierdzone empirycznie 2026-08-06 przez `ubus call zte-mc888 probe`. Warto zauważyć, że
+Potwierdzone empirycznie 2026-08-06 przez `ubus call zte-modem probe`. Warto zauważyć, że
 **hasło nie jest kodowane base64** — mimo że to najczęściej opisywany w sieci wariant dla ZTE.
 
 Gdy zapamiętany wariant przestanie działać (np. zmiana hasła), backend automatycznie
-przechodzi przez pozostałe. Ręczna diagnostyka: `ubus call zte-mc888 probe`.
+przechodzi przez pozostałe. Ręczna diagnostyka: `ubus call zte-modem probe`.
 
 ## ⚠️ Sesje na modemie
 
 CPE ZTE dopuszczają zwykle **jedną sesję administratora naraz**. Logowanie przy każdym
 odpytaniu wyrzucałoby użytkownika z panelu modemu co kilka sekund. Dlatego backend:
 
-- **reużywa cookie** z `/tmp/zte-mc888.cookie`; loguje się dopiero gdy modem przestanie
+- **reużywa cookie** z `/tmp/zte-modem.cookie`; loguje się dopiero gdy modem przestanie
   zwracać pola wymagające sesji (patrz ostrzeżenie o `loginfo` wyżej),
-- **cache'uje odpowiedź** w `/tmp/zte-mc888.json` — N otwartych kart LuCI to nadal
+- **cache'uje odpowiedź** w `/tmp/zte-modem.json` — N otwartych kart LuCI to nadal
   **jedno** zapytanie do modemu na `refresh_interval`,
-- **serializuje** równoległe wywołania przez `flock` na `/tmp/zte-mc888.lock`,
+- **serializuje** równoległe wywołania przez `flock` na `/tmp/zte-modem.lock`,
 - **degraduje się łagodnie**: brak sesji → pokazuje pola dostępne bez logowania plus
   czytelny komunikat; modem nieosiągalny → ostatnie znane dane oznaczone jako `_stale`.
 
 ## Diagnostyka
 
 ```sh
-ubus call zte-mc888 status     # pełny JSON (z cache, jeśli świeży)
-ubus call zte-mc888 probe      # wymusza logowanie, mówi który wariant zadziałał
-rm -f /tmp/zte-mc888.json      # wymuszenie odświeżenia
+ubus call zte-modem status     # pełny JSON (z cache, jeśli świeży)
+ubus call zte-modem probe      # wymusza logowanie, mówi który wariant zadziałał
+rm -f /tmp/zte-modem.json      # wymuszenie odświeżenia
 logread | grep rpcd            # gdy obiekt ubus się nie rejestruje
 ```
 
