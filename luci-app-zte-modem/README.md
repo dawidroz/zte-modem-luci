@@ -131,21 +131,45 @@ POST /goform/goform_set_cmd_process
 GET /goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd=pole1,pole2,…
 ```
 
-> ⚠️ **`cmd=loginfo` NIE służy do sprawdzania sesji.** Wbrew nazwie zwraca
-> `{"loginfo":"ok"}` **także bez cookie** — sprawdzone na MC888 i MC7010. Backend opierał
-> na nim detekcję sesji i przez to nigdy się nie logował: `_authenticated: true` przy
-> kompletnie pustych metrykach. Jedyny wiarygodny test to odczyt pola dostępnego wyłącznie
-> po zalogowaniu (`lte_rsrp`, `Z5g_rsrp`, `cell_id`, `wan_ipaddr` — kilku naraz, bo
-> pojedyncze bywa puste z innych powodów).
+> ⚠️ **`cmd=loginfo` NIE służy do sprawdzania sesji.** W formie **pojedynczej** zwraca
+> `{"loginfo":"ok"}` także **bez cookie** — sprawdzone na MC888. (Wewnątrz `multi_data=1`
+> to samo pole zachowuje się już poprawnie, ale różnica jest zbyt subtelna, żeby na niej
+> polegać.) Backend opierał na nim detekcję sesji i przez to nigdy się nie logował:
+> `_authenticated: true` przy kompletnie pustych metrykach.
+
+### Wykrywanie sesji: `user_ip_addr`
+
+Pole, po którym backend poznaje ważną sesję. Puste bez cookie, po zalogowaniu zawiera
+adres klienta rozmawiającego z modemem. Jako jedyne jest wypełnione na **wszystkich**
+sprawdzonych modelach i **nie zależy od karty SIM ani od zestawionego połączenia**:
+
+| model | bez cookie | z cookie |
+|---|---|---|
+| MC888 | `""` | `192.168.32.147` |
+| MC7010 | `""` | `192.168.8.20` |
+| MF79U (bez SIM) | `""` | `192.168.10.178` |
+
+To istotne właśnie dla modemu bez karty: metryki radiowe (`lte_rsrp`, `cell_id`, …) są
+wtedy puste z powodów niezwiązanych z sesją, więc oparta na nich heurystyka uznawała
+modem za wylogowany przy każdym odpytaniu i moduł logował się w kółko — walcząc o jedyną
+sesję z przeglądarką użytkownika. Pola radiowe zostają jako zapas.
+
+⚠️ `SSID1` / `AuthMode` / `LocalDomain` też są bramkowane sesją, ale **tylko na MF79U** —
+na MC888 i MC7010 są puste nawet po zalogowaniu. Nie nadają się na test uniwersalny.
 
 Wszystkie zapytania wymagają nagłówka `Referer: http://<modem>/index.html`.
 
 Potwierdzone na urządzeniach:
 
-| model | `model_name` | `wa_inner_version` | `network_type` |
-|---|---|---|---|
-| MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | `ENDC` |
-| MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | `LTE-NSA` |
+| model | `model_name` | `wa_inner_version` | `cmd=LD` | wariant logowania |
+|---|---|---|---|---|
+| MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | 64 hex | `sha256_sha256` |
+| MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | 64 hex | `sha256_sha256` |
+| MF79U | `MF79U` | `BD_MF79UV1.0.0B03` | **puste** | `b64_plain` |
+
+**Rodzina MF nie używa wyzwania.** `cmd=LD` zwraca `""`, a logowanie przechodzi samym
+`base64(hasło)` — czyli wariantem `b64_plain`, który backend ma już na liście i wykrywa
+sam, bez konfiguracji. Cookie sesji nazywa się `stok`.
 
 `cr_version` jest puste na obu. **`model_name` to wiarygodny klucz do rozpoznania modelu.**
 
@@ -163,7 +187,7 @@ działający** w `zte-modem.main.hash_variant`:
 |---|---|---|
 | `sha256_b64` | `SHA256(base64(hasło) + LD)` wielkimi literami | |
 | `sha256_sha256` | `SHA256(SHA256(hasło) + LD)` wielkimi literami | ✅ **działa na MC888 i MC7010** |
-| `b64_plain` | samo `base64(hasło)` (starsze firmware) | |
+| `b64_plain` | samo `base64(hasło)`, bez `LD` | ✅ **działa na MF79U** (rodzina MF) |
 | `md5_plain` | `MD5(hasło + LD)` | |
 
 Potwierdzone empirycznie 2026-08-06 przez `ubus call zte-modem probe`. Warto zauważyć, że

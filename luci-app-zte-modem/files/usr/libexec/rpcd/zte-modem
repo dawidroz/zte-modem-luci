@@ -77,20 +77,27 @@ _hash() { # $1=wariant $2=haslo $3=LD
 
 # Czy mamy wazna sesje?
 #
-# UWAGA: NIE uzywac do tego `cmd=loginfo`. Wbrew nazwie zwraca on {"loginfo":"ok"}
-# takze BEZ cookie - sprawdzone na MC888 i MC7010. Opieranie sie na nim sprawia,
-# ze modul nigdy sie nie loguje i wszystkie metryki sa puste.
+# UWAGA: NIE uzywac do tego `cmd=loginfo`. W formie POJEDYNCZEJ zwraca on
+# {"loginfo":"ok"} takze BEZ cookie - sprawdzone na MC888. (W multi_data=1 to
+# samo pole zachowuje sie juz poprawnie, ale roznica jest zbyt subtelna, zeby
+# na niej polegac.) Opieranie sie na loginfo sprawia, ze modul nigdy sie nie
+# loguje i wszystkie metryki sa puste.
 #
-# Jedyny wiarygodny test to proba odczytania pola, ktore modem oddaje wylacznie
-# po zalogowaniu. Bierzemy kilka, bo pojedyncze bywa puste z powodow niezaleznych
-# od sesji (5G SA nie ma pol LTE, brak zasiegu itd.).
+# Jedyny wiarygodny test to odczyt pola, ktore modem oddaje wylacznie po
+# zalogowaniu. Na czele `user_ip_addr` - jako jedyne jest wypelnione na
+# wszystkich sprawdzonych modelach (MC888, MC7010, MF79U) i NIE zalezy od karty
+# SIM ani od zestawionego polaczenia. Bez niego modem bez SIM-u wygladal na
+# wylogowany przy kazdym odpytaniu i modul logowal sie w kolko, walczac
+# o jedyna sesje z przegladarka uzytkownika.
+#
+# Reszta zostaje jako zapas na firmware, ktory user_ip_addr pomija.
 _logged_in() {
 	local v f
 
-	v="$(_get "isTest=false&multi_data=1&cmd=lte_rsrp,Z5g_rsrp,cell_id,wan_ipaddr")"
+	v="$(_get "isTest=false&multi_data=1&cmd=user_ip_addr,lte_rsrp,Z5g_rsrp,cell_id,wan_ipaddr")"
 	[ -n "$v" ] || return 1
 
-	for f in lte_rsrp Z5g_rsrp cell_id wan_ipaddr; do
+	for f in user_ip_addr lte_rsrp Z5g_rsrp cell_id wan_ipaddr; do
 		[ -n "$(printf '%s' "$v" | jsonfilter -q -e "@.$f")" ] && return 0
 	done
 
