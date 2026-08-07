@@ -47,14 +47,16 @@ var TIERS = {
 	] }
 };
 
+/* Rozne modele nazywaja to samo inaczej: MC888 mowi `ENDC`, MC7010 `LTE-NSA`. */
 var NETWORK_TYPES = {
-	'ENDC':   '5G NSA (ENDC)',
-	'NR5G':   '5G SA',
-	'nr5g':   '5G SA',
-	'LTE':    'LTE',
-	'LTE_CA': 'LTE + agregacja',
-	'WCDMA':  '3G',
-	'NO':     'brak zasiegu'
+	'ENDC':     '5G NSA (ENDC)',
+	'LTE-NSA':  '5G NSA',
+	'NR5G':     '5G SA',
+	'nr5g':     '5G SA',
+	'LTE':      'LTE',
+	'LTE_CA':   'LTE + agregacja',
+	'WCDMA':    '3G',
+	'NO':       'brak zasiegu'
 };
 
 function num(v) {
@@ -129,6 +131,21 @@ function metric(label, kind, value, unit) {
  * Identyfikacje masztu robi backend przez /api/v1/search, a wynik pokazuje
  * sekcja "Stacja bazowa" nizej.
  */
+/* PCI modem podaje SZESNASTKOWO - potwierdzone na MC7010, ktory zwrocil
+ * `lte_pci: "1e3"` i `nr5g_pci: "3d"`; "1e3" nie jest liczba dziesietna.
+ * Na MC888 wartosci ("11", "133") wygladaja na dziesietne, ale to ta sama
+ * rodzina firmware'u i to samo pole, a cell_id jest tam hexem potwierdzonym
+ * dopasowaniem w btsearch - wiec traktujemy je jednolicie jako hex.
+ *
+ * PCI przyjeto podawac dziesietnie (zakres 0-503), stad taka kolejnosc.
+ */
+function pci(hex) {
+	if (!hex) return '–';
+	var dec = parseInt(String(hex), 16);
+	if (isNaN(dec)) return txt(hex);
+	return dec + ' (0x' + String(hex).toLowerCase() + ')';
+}
+
 function cellId(hex) {
 	if (!hex) return '–';
 	var dec = parseInt(String(hex), 16);
@@ -257,7 +274,7 @@ function renderStatus(st) {
 			st.lte_ca_scell_band ? [_('Pasmo (SCell, CA)'), txt(st.lte_ca_scell_band)] : null,
 			st.lte_ca_scell_bandwidth ? [_('Szerokość (SCell)'), txt(st.lte_ca_scell_bandwidth) + ' MHz'] : null,
 			st.lte_ca_pcell_arfcn ? [_('EARFCN'), txt(st.lte_ca_pcell_arfcn)] : null,
-			[_('PCI'),                txt(st.lte_pci)],
+			[_('PCI'),                pci(st.lte_pci)],
 			[_('Cell ID'),            cellId(st.cell_id)]
 		]));
 	}
@@ -275,7 +292,7 @@ function renderStatus(st) {
 		out.push(infoTable([
 			[_('Pasmo'),    txt(st.nr5g_action_band)],
 			[_('Kanał'),    txt(st.nr5g_action_channel)],
-			[_('PCI'),      txt(st.nr5g_pci)],
+			[_('PCI'),      pci(st.nr5g_pci)],
 			st.Z5g_CELL_ID ? [_('Cell ID'), cellId(st.Z5g_CELL_ID)] : null
 		]));
 	}
