@@ -767,7 +767,9 @@ return view.extend({
 		}, interval);
 
 		var m = new form.Map('zte-modem', _('Modem ZTE'),
-			_('Monitoring sygnału modemu 5G stanowiącego łącze WAN tego routera.'));
+			/* Bez "5G" w opisie: obslugiwane modemy bywaja LTE-only (MF297D, MF79U),
+			   wiec obietnica 5G wprowadzalaby w blad. */
+			_('Monitoring sygnału modemu ZTE stanowiącego łącze WAN tego routera.'));
 
 		/* Przy m.tabbed kazda sekcja = osobna zakladka. data-tab bierze sie z
 		   sectiontype, wiec obie sekcje MUSZA miec rozny sectiontype. */
