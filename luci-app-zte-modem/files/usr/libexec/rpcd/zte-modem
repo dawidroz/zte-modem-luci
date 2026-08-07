@@ -34,6 +34,10 @@ VARIANTS="sha256_b64 sha256_sha256 b64_plain md5_plain"
 F="model_name,network_type,network_provider,signalbar,wan_ipaddr,ppp_status,modem_main_state"
 F="${F},wa_inner_version,cr_version,simcard_roam,ussd_write_flag"
 F="${F},lte_rsrp,lte_rsrq,lte_rssi,lte_snr,lte_pci,cell_id"
+# MF297D nie wypelnia lte_snr ani lte_rssi - te same wielkosci podaje pod
+# krotszymi nazwami `sinr` i `rssi`. Na MC888 jest odwrotnie, wiec obie pary
+# pobieramy i widok bierze pierwsza niepusta.
+F="${F},sinr,rssi"
 F="${F},lte_ca_pcell_band,lte_ca_pcell_bandwidth,lte_ca_scell_band"
 F="${F},lte_ca_scell_bandwidth,lte_ca_pcell_arfcn,wan_active_band"
 # Pelna agregacja: "idx,PCI,?,pasmo,EARFCN,szerokosc" rozdzielone ';'.

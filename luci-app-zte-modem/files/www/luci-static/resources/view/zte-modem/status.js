@@ -177,6 +177,23 @@ function enodeb(cid, hex) {
 	       '  ·  ' + _('sektor') + ' ' + sec;
 }
 
+/* Te same wielkosci pod roznymi nazwami: MC888 wypelnia `lte_snr` / `lte_rssi`,
+ * MF297D zostawia je puste i podaje `sinr` / `rssi`. Bierzemy pierwsza niepusta. */
+function snrOf(st) {
+	var v = num(st.lte_snr);
+	return (v !== null) ? v : num(st.sinr);
+}
+
+/* RSSI: MF297D gubi znak. W ciagu osmiu kolejnych probek zwrocil raz "-69",
+ * a poza tym "67" i "71" - ta sama wielkosc, raz ze znakiem, raz bez. RSSI w
+ * LTE jest zawsze ujemne (praktyczny zakres -110..-40 dBm), wiec normalizujemy
+ * do -|v|. Dla poprawnie podpisanego `lte_rssi` ("-73") to operacja pusta. */
+function rssiOf(st) {
+	var v = num(st.lte_rssi);
+	if (v === null) v = num(st.rssi);
+	return (v === null) ? null : -Math.abs(v);
+}
+
 function infoTable(rows) {
 	return E('table', { 'class': 'table', 'style': 'margin-top:.5em' },
 		rows.filter(function(r) { return r !== null; }).map(function(r) {
@@ -474,8 +491,8 @@ function renderStatus(st) {
 	]));
 
 	/* LTE */
-	var hasLte = [st.lte_rsrp, st.lte_rsrq, st.lte_rssi, st.lte_snr]
-		.some(function(v) { return num(v) !== null; });
+	var hasLte = [num(st.lte_rsrp), num(st.lte_rsrq), rssiOf(st), snrOf(st)]
+		.some(function(v) { return v !== null; });
 
 	var hex = pciHex(st), chex = cellHex(st);
 
@@ -483,8 +500,8 @@ function renderStatus(st) {
 		out.push(block('LTE', [
 			metric('RSRP', 'rsrp', st.lte_rsrp, 'dBm'),
 			metric('RSRQ', 'rsrq', st.lte_rsrq, 'dB'),
-			metric('RSSI', 'rssi', st.lte_rssi, 'dBm'),
-			metric('SNR',  'sinr', st.lte_snr,  'dB')
+			metric('RSSI', 'rssi', rssiOf(st), 'dBm'),
+			metric('SNR',  'sinr', snrOf(st),  'dB')
 		]));
 		/* Tabela nosnych podaje juz pasmo, szerokosc, EARFCN i PCI kazdej nosnej,
 		   wiec nie powtarzamy tu "Aktywne pasmo" ani PCI nosnej glownej.

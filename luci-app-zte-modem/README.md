@@ -172,6 +172,15 @@ Potwierdzone na urządzeniach:
 seria MC: `cmd=LD` zwraca 64 znaki hex i loguje się wariantem `sha256_sha256`. Wszelkie
 reguły „per rodzina" trzeba więc opierać na zachowaniu, nie na prefiksie nazwy.
 
+⚠️ **SNR i RSSI mają na MF297D INNE nazwy.** `lte_snr` i `lte_rssi` są tam puste, a te
+same wielkości siedzą pod `sinr` i `rssi`. Na MC888 jest odwrotnie (`sinr`/`rssi` puste).
+Backend pobiera obie pary, widok bierze pierwszą niepustą (`snrOf`, `rssiOf`).
+
+⚠️ **`rssi` na MF297D gubi znak.** W ośmiu kolejnych próbkach wróciło raz `-69`,
+a poza tym `67` i `71` — ta sama wielkość, raz ze znakiem, raz bez. RSSI w LTE jest
+zawsze ujemne (praktycznie −110…−40 dBm), więc widok normalizuje do `-|v|`. Dla
+poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
+
 ⚠️ **`lte_ca_scell_band` = `"0"` przy wyłączonej agregacji.** MF297D zwraca wtedy
 `lte_ca_scell_band: "0"` i `lte_ca_scell_bandwidth: "0.0"` — jako łańcuchy są
 **prawdziwe**, więc zwykłe `if (st.lte_ca_scell_band)` dorzuca widmową nośną
