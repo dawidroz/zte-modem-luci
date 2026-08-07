@@ -32,7 +32,12 @@ for p in "${PKGS[@]}"; do
 	[ -d "$ROOT/$p/files" ] || { echo "Pakiet '$p' nie ma katalogu files/" >&2; exit 1; }
 done
 
-SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$TARGET")
+# -n odcina stdin. BEZ tego ssh wciaga liste plikow z `find` w petli nizej
+# i wgrywa sie tylko pierwszy plik z pakietu - przy czym skrypt konczy sie
+# sukcesem, wiec brak reszty wyglada jak dzialajacy deploy.
+SSH=(ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$TARGET")
+# Wariant do przesylania tresci pliku - tutaj stdin jest potrzebny.
+SSH_IN=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$TARGET")
 
 run() {
 	if [ "$DRY" -eq 1 ]; then
@@ -54,7 +59,7 @@ mode_for() {
 put() { # $1 = plik zrodlowy, $2 = sciezka docelowa, $3 = tryb
 	if [ "$DRY" -eq 1 ]; then return 0; fi
 	"${SSH[@]}" "mkdir -p '$(dirname "$2")'"
-	"${SSH[@]}" "cat > '$2.new' && chmod $3 '$2.new' && mv '$2.new' '$2'" < "$1"
+	"${SSH_IN[@]}" "cat > '$2.new' && chmod $3 '$2.new' && mv '$2.new' '$2'" < "$1"
 }
 
 echo "Cel: $TARGET"
@@ -63,7 +68,10 @@ echo "Cel: $TARGET"
 for p in "${PKGS[@]}"; do
 	echo
 	echo "Pakiet $p:"
+	seen=0
+	expected="$(find "$ROOT/$p/files" -type f | wc -l)"
 	while IFS= read -r src; do
+		seen=$((seen + 1))
 		dst="${src#"$ROOT/$p/files"}"
 		mode="$(mode_for "$dst")"
 
@@ -81,6 +89,13 @@ for p in "${PKGS[@]}"; do
 		echo "  -> $dst ($mode)"
 		put "$src" "$dst" "$mode"
 	done < <(find "$ROOT/$p/files" -type f | sort)
+
+	# Siatka bezpieczenstwa: gdyby cokolwiek znow zjadlo liste plikow, ma to
+	# byc bledem, a nie cichym czesciowym wdrozeniem zakonczonym "Gotowe".
+	if [ "$seen" -ne "$expected" ]; then
+		echo "  BLAD: przetworzono $seen z $expected plikow pakietu $p" >&2
+		exit 1
+	fi
 done
 
 echo

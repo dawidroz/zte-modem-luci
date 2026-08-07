@@ -66,13 +66,28 @@ poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 ⚠️ Liczniki są **modemu, nie routera** — nie zgadzają się z ruchem mierzonym na
 interfejsie WAN i nie da się ich wyzerować z poziomu modułu (zakres tylko do odczytu).
 
-⚠️ `realtime_*_bytes` **nie są jeszcze zweryfikowane per model** — dopisane do listy
-pól później niż reszta. Widok pomija sekcję „Bieżące połączenie", gdy obie wartości są
+✅ `realtime_*_bytes` potwierdzone na **MC888** (2026-08-07). Na pozostałych modelach
+jeszcze niesprawdzone — widok pomija sekcję „Bieżące połączenie", gdy obie wartości są
 puste, więc firmware bez tych liczników degraduje się cicho. Przy okazji profilowania
 kolejnego modemu warto uzupełnić tę tabelę.
 
 ⚠️ `realtime_*_thrpt` podaje **bajty/s**, a nie bity — widok mnoży przez 8, żeby pokazać
-Mb/s porównywalne z sufitem teoretycznym.
+Mb/s porównywalne z sufitem teoretycznym. Zweryfikowane na MC888 (2026-08-07).
+
+⚠️⚠️ **`realtime_*_thrpt` jest chwilowe w oknie rzędu sekundy** i praktycznie
+nieskorelowane ze średnią z dłuższego okresu. W pomiarze 13 kolejnych próbek co 10 s
+wartość skakała o **pięć rzędów wielkości** (208 → 1 956 423), a stosunek do
+rzeczywistego przepływu liczonego z przyrostu `realtime_rx_bytes` wahał się od 25% do
+207 000%.
+
+Konsekwencja dla weryfikacji jednostki: **średnia z próbek niczego nie dowodzi** —
+zależy wyłącznie od tego, czy trafi się w szczyt ruchu. Rozstrzyga porównanie
+**maksimów**: najwyższe zaobserwowane `thrpt` musi być ≥ najwyższej średniej z licznika
+bajtów, bo chwilowe szczyty nie mogą być niższe od średniej, którą łącze utrzymało.
+Przy interpretacji „bity/s" ten warunek był łamany, przy „bajty/s" spełniony.
+
+Do mierzenia rzeczywistej przepustowości używać **przyrostu `realtime_*_bytes`**,
+nie uśredniania `thrpt`.
 
 ## Tożsamość urządzenia i karty SIM
 

@@ -34,6 +34,7 @@ w odpowiednim dokumencie. Warto przeczytać **przed** dodaniem obsługi kolejneg
 | **SNR/RSSI pod alternatywnymi nazwami** | puste metryki na MF297D mimo dobrego sygnału | [modele](modele.md#metryki-radiowe) |
 | **`rssi` bez znaku** | RSSI `67` zamiast `-67` | [modele](modele.md#metryki-radiowe) |
 | **`lte_ca_scell_band` = `"0"`** | widmowa nośna „B0, 0.0 MHz" w tabeli | [modele](modele.md#agregacja-nośnych-ca) |
+| **`realtime_*_thrpt` skacze o 5 rzędów wielkości** | uśrednianie próbek daje wynik zależny od trafienia w szczyt, nie od łącza | [modele](modele.md#liczniki-transferu) |
 | **IMSI tylko z `sim_imsi`** | puste IMSI na serii MC | [modele](modele.md#tożsamość-urządzenia-i-karty-sim) |
 | **ICCID z końcowym `F`** | 20 znaków zamiast 19 cyfr | [modele](modele.md#tożsamość-urządzenia-i-karty-sim) |
 | **Wersja panelu w dwóch różnych polach** | `web_version` pusty na MF297D | [modele](modele.md#tożsamość-urządzenia-i-karty-sim) |
