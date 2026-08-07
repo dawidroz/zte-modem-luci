@@ -68,15 +68,25 @@ _hash() { # $1=wariant $2=haslo $3=LD
 	esac
 }
 
-# Czy mamy wazna sesje? ZTE wystawia do tego dedykowana komende.
+# Czy mamy wazna sesje?
+#
+# UWAGA: NIE uzywac do tego `cmd=loginfo`. Wbrew nazwie zwraca on {"loginfo":"ok"}
+# takze BEZ cookie - sprawdzone na MC888 i MC7010. Opieranie sie na nim sprawia,
+# ze modul nigdy sie nie loguje i wszystkie metryki sa puste.
+#
+# Jedyny wiarygodny test to proba odczytania pola, ktore modem oddaje wylacznie
+# po zalogowaniu. Bierzemy kilka, bo pojedyncze bywa puste z powodow niezaleznych
+# od sesji (5G SA nie ma pol LTE, brak zasiegu itd.).
 _logged_in() {
-	local v
-	v="$(_get "isTest=false&cmd=loginfo" | jsonfilter -q -e '@.loginfo' 2>/dev/null)"
-	[ "$v" = "ok" ] && return 0
-	# Fallback dla firmware bez loginfo: pole widoczne tylko po zalogowaniu.
-	v="$(_get "isTest=false&multi_data=1&cmd=lte_rsrp,Z5g_rsrp" 2>/dev/null)"
-	[ -n "$(printf '%s' "$v" | jsonfilter -q -e '@.lte_rsrp')" ] && return 0
-	[ -n "$(printf '%s' "$v" | jsonfilter -q -e '@.Z5g_rsrp')" ] && return 0
+	local v f
+
+	v="$(_get "isTest=false&multi_data=1&cmd=lte_rsrp,Z5g_rsrp,cell_id,wan_ipaddr")"
+	[ -n "$v" ] || return 1
+
+	for f in lte_rsrp Z5g_rsrp cell_id wan_ipaddr; do
+		[ -n "$(printf '%s' "$v" | jsonfilter -q -e "@.$f")" ] && return 0
+	done
+
 	return 1
 }
 
@@ -277,7 +287,9 @@ show_status() {
 		if [ "$age" -lt "$INTERVAL" ]; then
 			cat "$CACHE"
 		else
-			_refresh > "${CACHE}.new" 2>/dev/null
+			# Bez 2>/dev/null - stderr ma byc widoczny przy diagnostyce
+			# (`sh -x /usr/libexec/rpcd/zte-mc888 call status`).
+			_refresh > "${CACHE}.new"
 			if [ -s "${CACHE}.new" ]; then
 				mv "${CACHE}.new" "$CACHE"
 			else
