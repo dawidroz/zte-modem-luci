@@ -1,15 +1,25 @@
-# luci-app-zte-modem — monitoring modemów ZTE (MC888, MC7010, …) w LuCI
+# luci-app-zte-modem — monitoring modemów ZTE (MC888, MC7010, MF297D, …) w LuCI
 
 Moduł LuCI pokazujący na żywo parametry sygnału modemu ZTE stanowiącego łącze WAN routera.
+
+> **To jest wersja _light_.** Zakres zamknięty: sygnał, nośne, transfer bieżący oraz
+> tożsamość urządzenia i karty SIM — cztery zakładki, zero zapisu do pamięci trwałej.
+> Statystyki, historia sygnału i wykresy trafią do **osobnej, rozbudowanej wersji**
+> pod własną nazwą; tutaj świadomie ich nie ma.
 
 Wdrożenia:
 
 | Router | Modem | Adres modemu |
 |---|---|---|
 | R2 — MikroTik RB5009, OpenWrt 24.10.2 (`192.168.0.1`) | **MC888** | `192.168.32.1` |
-| Cudy WR3000S, OpenWrt 24.10.2 (`192.168.10.1`) | **MC7010** | `192.168.8.1` |
+| Cudy WR3000S, OpenWrt 24.10.2 (ZeroTier `10.0.0.2`) | **MC7010** | `192.168.8.1` |
+| Zyxel, OpenWrt 24.10.2 (`192.168.0.6`) | **MF297D** | `192.168.0.7` |
 
-W obu przypadkach modem jest **bramą domyślną routera**. To
+Do Cudy chodzimy **adresem ZeroTier**, bo `192.168.10.1` bywa przesłaniany przez modemy
+podpinane lokalnie do stacji roboczej (MF79U po USB, MF297D po Ethernecie miały tam
+własny panel — sieć bezpośrednio podłączona wygrywa z trasą).
+
+W każdym przypadku modem jest **bramą domyślną routera**. To
 samodzielny CPE po Ethernecie, więc `modemdata`/`modemband`/`sms-tool` z feedu eko.one.pl
 **nie mają zastosowania** (zależą od `comgt`/AT i wymagają `/dev/ttyUSB*` albo
 `/dev/cdc-wdm*`, których na tych routerach nie ma). Komunikacja idzie po HTTP przez `goform`.
@@ -171,6 +181,34 @@ Potwierdzone na urządzeniach:
 ⚠️ **Nazwa modelu NIE wyznacza rodziny.** MF297D ma w nazwie „MF", ale zachowuje się jak
 seria MC: `cmd=LD` zwraca 64 znaki hex i loguje się wariantem `sha256_sha256`. Wszelkie
 reguły „per rodzina" trzeba więc opierać na zachowaniu, nie na prefiksie nazwy.
+
+## Tożsamość urządzenia i karty SIM (zakładka „Modem")
+
+| pole | MC888 | MC7010 | MF297D |
+|---|---|---|---|
+| `hardware_version` | `MC888HWV1.0.0` | `MC7010-1` | `MF297DHW1.0` |
+| `web_version` | ✓ | ✓ | **puste** |
+| `cr_version` | puste | puste | `MF297D_Nordic1_B16` |
+| `iccid` | 19 cyfr | 20 cyfr | 20 znaków, **z końcowym `F`** |
+| `imsi` | **puste** | **puste** | ✓ |
+| `sim_imsi` | ✓ | ✓ | ✓ |
+| `pdp_type` | `IPv6` | `IPv4v6` | `IP` |
+| `ipv6_wan_ipaddr` | adres | adres | **`::`** |
+
+Pułapki:
+- **IMSI trzeba brać z `sim_imsi`** — `imsi` wypełnia dopiero MF297D.
+- **ICCID kończy się `F`** na MF297D (`…080F`). To dopełniający półbajt kodowania
+  BCD, nie cyfra numeru — widok ucina pojedyncze końcowe `F`.
+- **Wersję panelu podają dwa różne pola:** MC mają `web_version`, MF297D `cr_version`.
+- **`ipv6_wan_ipaddr` bywa `"::"`** zamiast pustego — wiersz wtedy nie powstaje.
+- **`msisdn`, `sim_card_status`, `sim_slot`, `mac_address` są puste na wszystkich
+  trzech** — nie ma sensu ich pobierać. Stan karty czytamy z `modem_main_state`
+  (`modem_init_complete`, `modem_sim_undetected`, `modem_waiting_pin`…).
+
+Lista `FIELDS` ma po tej zmianie ~57 pól i **działa** — sprawdzone przez porównanie
+liczby niepustych pól przed i po (36→49, 34→47, 24→37, nic nie zniknęło). Warto to
+pamiętać, bo objaw „nagle mniej danych" pochodzi z **wygasłej sesji**, nie z długości
+zapytania (patrz ostrzeżenie wyżej).
 
 ⚠️ **SNR i RSSI mają na MF297D INNE nazwy.** `lte_snr` i `lte_rssi` są tam puste, a te
 same wielkości siedzą pod `sinr` i `rssi`. Na MC888 jest odwrotnie (`sinr`/`rssi` puste).

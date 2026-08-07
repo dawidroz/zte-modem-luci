@@ -605,6 +605,129 @@ function renderTransfer(st) {
 	return out;
 }
 
+/* --- zakladka "Modem": tozsamosc urzadzenia, karty i polaczenia ------------ */
+
+/* ICCID bywa 20-znakowe z dopelniajacym polbajtem BCD na koncu: MF297D zwraca
+   "8948032552546103080F". Koncowe F nie jest cyfra numeru, wiec je ucinamy.
+   MC7010 ma 20 samych cyfr, MC888 19 - tam nie ma czego ciac. */
+function iccidOf(st) {
+	var v = st.iccid;
+	if (!v) return null;
+	return String(v).replace(/[Ff]$/, '');
+}
+
+/* IMSI: `sim_imsi` jest na wszystkich trzech modemach, `imsi` dopiero na MF297D. */
+function imsiOf(st) {
+	return st.sim_imsi || st.imsi || null;
+}
+
+/* PLMN z rozdzielonych pol: 260-03 (Orange PL), 246-01 (Telia LT).
+   MNC zwyczajowo pisze sie dwucyfrowo. */
+function plmn(st) {
+	if (!st.rmcc || !st.rmnc) return null;
+	var mnc = String(st.rmnc);
+	if (mnc.length < 2) mnc = '0' + mnc;
+	return st.rmcc + '-' + mnc;
+}
+
+/* Stan modemu/karty. Mapujemy tylko wartosci potwierdzone empirycznie;
+   nieznane pokazujemy SUROWO, zeby nie udawac wiedzy, ktorej nie mam. */
+var MODEM_STATES = {
+	'modem_init_complete': _('gotowa'),
+	'modem_sim_undetected': _('brak karty'),
+	'modem_waiting_pin':   _('oczekuje na PIN'),
+	'modem_waiting_puk':   _('oczekuje na PUK'),
+	'modem_sim_destroy':   _('karta uszkodzona'),
+	'modem_undetected':    _('modem niewykryty')
+};
+
+function simState(st) {
+	if (!st.modem_main_state) return null;
+	return MODEM_STATES[st.modem_main_state] || String(st.modem_main_state);
+}
+
+function duration(v) {
+	var s = num(v);
+	if (s === null || s < 0) return null;
+
+	var d = Math.floor(s / 86400),
+	    h = Math.floor(s % 86400 / 3600),
+	    m = Math.floor(s % 3600 / 60);
+
+	if (d) return d + ' ' + _('dni') + ' ' + h + ' ' + _('godz.');
+	if (h) return h + ' ' + _('godz.') + ' ' + m + ' ' + _('min');
+	return m + ' ' + _('min');
+}
+
+/* Sekcja powstaje tylko wtedy, gdy ma cokolwiek do pokazania - modem bez karty
+   nie ma wyswietlac pustej ramki "Karta SIM". */
+function infoBlock(title, rows) {
+	var real = rows.filter(function(r) { return r !== null; });
+	if (!real.length) return null;
+
+	return E('div', {}, [
+		E('h4', { 'style': 'margin:1.2em 0 .3em' }, title),
+		infoTable(real)
+	]);
+}
+
+function row(label, value) {
+	return (value === undefined || value === null || value === '')
+		? null : [label, String(value)];
+}
+
+function renderDevice(st) {
+	st = st || {};
+	var out = [];
+
+	if (st._error)
+		out.push(banner(st._error, COLORS.poor));
+
+	var blocks = [
+		infoBlock(_('Urządzenie'), [
+			row(_('Model'),             st.model_name),
+			row(_('Firmware'),          st.wa_inner_version),
+			row(_('Wersja sprzętowa'),  st.hardware_version),
+			/* Rozne modele wypelniaja rozne pola: MC maja web_version,
+			   MF297D zamiast tego cr_version. */
+			row(_('Wersja panelu'),     st.web_version || st.cr_version),
+			row('IMEI',                 st.imei),
+			row(_('Adres modemu'),      st.lan_ipaddr || st._host)
+		]),
+
+		infoBlock(_('Karta SIM'), [
+			row(_('Stan'),      simState(st)),
+			row('ICCID',        iccidOf(st)),
+			row('IMSI',         imsiOf(st)),
+			row('PLMN',         plmn(st)),
+			row(_('Operator'),  st.network_provider),
+			row(_('Blokada PIN'), st.pin_status === '0' ? _('wyłączona') : st.pin_status),
+			row(_('Roaming'),   st.simcard_roam === 'Home' ? _('nie (sieć macierzysta)')
+			                                               : st.simcard_roam)
+		]),
+
+		infoBlock(_('Połączenie'), [
+			row('APN',              st.wan_apn),
+			row(_('Typ PDP'),       st.pdp_type),
+			row(_('Adres IPv4'),    st.wan_ipaddr),
+			/* MF297D bez IPv6 zwraca "::" zamiast pustej wartosci. */
+			row(_('Adres IPv6'),    (st.ipv6_wan_ipaddr === '::') ? null : st.ipv6_wan_ipaddr),
+			row(_('Czas trwania'),  duration(st.realtime_time)),
+			row(_('Wybór sieci'),   st.net_select_mode === 'auto_select' ? _('automatyczny')
+			                                                            : st.net_select_mode)
+		])
+	].filter(function(b) { return b !== null; });
+
+	if (!blocks.length)
+		out.push(banner(_('Modem nie zwrócił żadnych danych o urządzeniu.'), COLORS.ok));
+	else
+		blocks.forEach(function(b) { out.push(b); });
+
+	out.push(footer(st));
+
+	return out;
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -620,7 +743,8 @@ return view.extend({
 		/* Kazda zakladka ma wlasny panel; poller podmienia oba naraz z jednego odczytu. */
 		var panels = {
 			status:   E('div', {}, renderStatus(st)),
-			transfer: E('div', {}, renderTransfer(st))
+			transfer: E('div', {}, renderTransfer(st)),
+			device:   E('div', {}, renderDevice(st))
 		};
 
 		function swap(key, content) {
@@ -638,6 +762,7 @@ return view.extend({
 				res = res || {};
 				swap('status',   renderStatus(res));
 				swap('transfer', renderTransfer(res));
+				swap('device',   renderDevice(res));
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
 
@@ -669,7 +794,10 @@ return view.extend({
 		/* --- zakladka 2: Transfer ----------------------------------------- */
 		m.section(panelTab('transfer', _('Transfer')), 'main', 'transfer');
 
-		/* --- zakladka 3: Konfiguracja ------------------------------------- */
+		/* --- zakladka 3: Modem ------------------------------------------- */
+		m.section(panelTab('device', _('Modem')), 'main', 'device');
+
+		/* --- zakladka 4: Konfiguracja ------------------------------------- */
 		var s = m.section(form.NamedSection, 'main', 'zte-modem', _('Konfiguracja'));
 
 		/* Tytul sekcji jest juz etykieta zakladki - nie powtarzaj go w <h3>. */
