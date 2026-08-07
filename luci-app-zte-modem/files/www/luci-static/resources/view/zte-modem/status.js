@@ -106,11 +106,14 @@ function quality(kind, v) {
 /* Uzywa natywnego .cbi-progressbar z LuCI - motyw renderuje `title` jako
    etykiete NAD paskiem (`::before { content: attr(title) }`), wiec wartosc
    i ocena jakosci trafiaja tam zamiast do osobnego diva. */
+/* Zwraca null, gdy modem nie podaje tej metryki. Modele roznia sie zakresem pol
+ * (MC7010 nie raportuje RSRQ dla 5G NR, MC888 raportuje), a pusty pasek "brak
+ * danych" sugerowalby awarie zamiast braku wsparcia w firmwarze. */
 function metric(label, kind, value, unit) {
 	var q = quality(kind, value);
-	var caption = q
-		? (q.value + (unit ? ' ' + unit : '') + ' · ' + q.label)
-		: _('brak danych');
+	if (!q) return null;
+
+	var caption = q.value + (unit ? ' ' + unit : '') + ' · ' + q.label;
 
 	return E('div', {
 		'style': 'flex:1 1 190px;min-width:190px;padding:10px 12px 6px;' +
@@ -118,8 +121,7 @@ function metric(label, kind, value, unit) {
 	}, [
 		E('div', { 'style': 'font-size:.85em;opacity:.75' }, label),
 		E('div', { 'class': 'cbi-progressbar', 'title': caption },
-			E('div', { 'style': 'width:' + (q ? q.pct.toFixed(0) : 0) + '%' +
-			                    (q ? ';background:' + q.color : '') }))
+			E('div', { 'style': 'width:' + q.pct.toFixed(0) + '%;background:' + q.color }))
 	]);
 }
 
@@ -241,6 +243,29 @@ function ceiling(rb) {
 	return rb * 126 * 6 * 2 / 1000;   /* Mb/s */
 }
 
+/* Pasmo nosnej glownej bywa podane na trzy sposoby, zaleznie od modelu i od tego,
+ * czy akurat dziala agregacja: `lte_ca_pcell_band` ("7"), `lte_band` ("7") albo
+ * `wan_active_band` ("LTE BAND 7"). Bez agregacji pierwsze bywa puste.
+ */
+function bandOf(st) {
+	if (st.lte_ca_pcell_band) return String(st.lte_ca_pcell_band);
+	if (st.lte_band)          return String(st.lte_band);
+	var m = String(st.wan_active_band || '').match(/(\d+)/);
+	return m ? m[1] : null;
+}
+
+/* Szerokosc nosnej glownej. `lte_ca_pcell_bandwidth` to liczba ("15.0"), ale bez
+ * agregacji potrafi byc puste; `bandwidth` to tekst ("15MHz") i jest wypelnione
+ * zawsze. Bez tego zapasu przy jednej nosnej nie da sie policzyc ani lacznej
+ * szerokosci, ani sufitu.
+ */
+function bwOf(st) {
+	var n = num(st.lte_ca_pcell_bandwidth);
+	if (n !== null) return n;
+	var m = String(st.bandwidth || '').match(/([\d.]+)/);
+	return m ? num(m[1]) : null;
+}
+
 function carriers(st) {
 	var rows = [];
 
@@ -250,33 +275,33 @@ function carriers(st) {
 		return isNaN(d) ? String(v) : String(d);
 	}
 
-	if (st.lte_ca_pcell_band)
-		rows.push(['PCell', 'B' + st.lte_ca_pcell_band,
-			st.lte_ca_pcell_bandwidth ? st.lte_ca_pcell_bandwidth + ' MHz' : '–',
-			txt(st.lte_ca_pcell_freq || st.wan_active_channel || st.lte_ca_pcell_arfcn),
-			hexDec(st.lte_pci)]);
+	var pband = bandOf(st), pbw = bwOf(st);
+	if (pband || pbw !== null)
+		rows.push({
+			name:   'PCell',
+			band:   pband ? 'B' + pband : '–',
+			bw:     pbw,
+			earfcn: txt(st.lte_ca_pcell_freq || st.wan_active_channel || st.lte_ca_pcell_arfcn),
+			pci:    hexDec(st.lte_pci)
+		});
 
 	if (st.lte_multi_ca_scell_info) {
 		String(st.lte_multi_ca_scell_info).split(';').forEach(function(part) {
 			var f = part.split(',');
 			if (f.length < 6) return;
-			rows.push(['SCC' + f[0], 'B' + f[3], f[5] + ' MHz', f[4], f[1]]);
+			rows.push({ name: 'SCC' + f[0], band: 'B' + f[3], bw: num(f[5]),
+			            earfcn: f[4], pci: f[1] });
 		});
 	} else if (st.lte_ca_scell_band) {
-		rows.push(['SCC1', 'B' + st.lte_ca_scell_band,
-			st.lte_ca_scell_bandwidth ? st.lte_ca_scell_bandwidth + ' MHz' : '–',
-			'–', '–']);
+		rows.push({ name: 'SCC1', band: 'B' + st.lte_ca_scell_band,
+		            bw: num(st.lte_ca_scell_bandwidth), earfcn: '–', pci: '–' });
 	}
 
 	if (!rows.length)
 		return E('div', {});
 
-	var total = rows.reduce(function(a, r) {
-		var n = parseFloat(r[2]);
-		return a + (isNaN(n) ? 0 : n);
-	}, 0);
-
-	var rb = rows.reduce(function(a, r) { return a + rbFor(r[2]); }, 0);
+	var total = rows.reduce(function(a, r) { return a + (r.bw || 0); }, 0);
+	var rb    = rows.reduce(function(a, r) { return a + rbFor(r.bw); }, 0);
 
 	var head = E('tr', { 'class': 'tr table-titles' },
 		[_('Nośna'), _('Pasmo'), _('Szerokość'), 'EARFCN', 'PCI'].map(function(h) {
@@ -284,33 +309,51 @@ function carriers(st) {
 		}));
 
 	var body = rows.map(function(r) {
-		return E('tr', { 'class': 'tr' }, r.map(function(c) {
+		var cells = [r.name, r.band,
+		             r.bw !== null ? r.bw.toFixed(1) + ' MHz' : '–',
+		             r.earfcn, r.pci];
+		return E('tr', { 'class': 'tr' }, cells.map(function(c) {
 			return E('td', { 'class': 'td left' }, String(c));
 		}));
 	});
 
+	/* Szerokosc kanalu bywa nieznana: `bandwidth` ma tylko czesc modeli, a pola
+	   lte_ca_* potrafia byc puste. Wtedy nadal pokazujemy pasma - milczace
+	   zniknicie calej sekcji wygladalo jak usterka modulu. */
+	var unknown = rows.filter(function(r) { return r.bw === null; }).length;
+	var caText  = rows.length > 1 ? rows.length + '×CA' : _('bez agregacji');
+
+	var summary = (total > 0)
+		? ((rows.length > 1 ? _('Łączna szerokość') : _('Szerokość')) + ': ' +
+		   total.toFixed(1) + ' MHz  ·  ' + caText + (rb ? '  ·  ' + rb + ' RB' : '') +
+		   (unknown ? '  ·  ' + _('bez %d nośnych o nieznanej szerokości').format(unknown) : ''))
+		: (caText + '  ·  ' + _('modem nie podał szerokości kanału'));
+
+	var ceilingNode = (rb > 0)
+		? E('div', { 'style': 'font-size:.85em;opacity:.7' }, [
+			(unknown ? _('Sufit teoretyczny (częściowy)') : _('Sufit teoretyczny')) +
+				': ~' + Math.round(ceiling(rb)) + ' Mb/s ',
+			E('span', {
+				'style': 'opacity:.8;cursor:help',
+				'title': _('Maksimum warstwy fizycznej przy założeniu 64QAM i 2 strumieni MIMO. ' +
+				           'Modem nie podaje modulacji ani MIMO, więc to górne ograniczenie, ' +
+				           'a nie prognoza — realny transfer bywa rzędu 20–30% tej wartości.')
+			}, _('(64QAM 2×2, wartość graniczna)'))
+		])
+		: E('div', { 'style': 'font-size:.85em;opacity:.55' },
+			_('Sufit teoretyczny: nie do policzenia — ten model nie podaje szerokości kanału.'));
+
 	return E('div', {}, [
 		E('table', { 'class': 'table', 'style': 'margin-top:.5em' }, [head].concat(body)),
-		total > 0
-			? E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' },
-				_('Łączna szerokość') + ': ' + total.toFixed(1) + ' MHz  ·  ' +
-				rows.length + '×CA' + (rb ? '  ·  ' + rb + ' RB' : ''))
-			: '',
-		rb > 0
-			? E('div', { 'style': 'font-size:.85em;opacity:.7' }, [
-				_('Sufit teoretyczny') + ': ~' + Math.round(ceiling(rb)) + ' Mb/s ',
-				E('span', {
-					'style': 'opacity:.8;cursor:help',
-					'title': _('Maksimum warstwy fizycznej przy założeniu 64QAM i 2 strumieni MIMO. ' +
-					           'Modem nie podaje modulacji ani MIMO, więc to górne ograniczenie, ' +
-					           'a nie prognoza — realny transfer bywa rzędu 20–30% tej wartości.')
-				}, _('(64QAM 2×2, wartość graniczna)'))
-			])
-			: ''
+		E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' }, summary),
+		ceilingNode
 	]);
 }
 
 function block(title, children) {
+	children = children.filter(function(c) { return c !== null; });
+	if (!children.length) return E('div', {});
+
 	return E('div', { 'style': 'margin-bottom:1.2em' }, [
 		E('h4', { 'style': 'margin:.3em 0 .5em' }, title),
 		E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:8px' }, children)
@@ -387,13 +430,12 @@ function renderStatus(st) {
 		   wan_active_band zostaje wylacznie jako zapas dla modemow, ktore w ogole
 		   nie raportuja pol CA (spodziewane w serii MF) - inaczej informacja
 		   o pasmie zniknelaby calkiem. */
-		var hasCA = !!(st.lte_ca_pcell_band || st.lte_multi_ca_scell_info ||
-		               st.lte_ca_scell_band);
+		var hasCarriers = !!(bandOf(st) || bwOf(st) !== null || st.lte_ca_scell_band);
 
 		out.push(carriers(st));
 		out.push(infoTable([
-			(!hasCA && st.wan_active_band) ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
-			(!hasCA && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci)] : null,
+			(!hasCarriers && st.wan_active_band) ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
+			(!hasCarriers && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci)] : null,
 			[_('Cell ID'),            cellId(st.cell_id)],
 			st.enodeb_id ? [_('eNodeB ID'), cellId(st.enodeb_id)] : null
 		]));

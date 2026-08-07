@@ -40,6 +40,9 @@ F="${F},lte_ca_scell_bandwidth,lte_ca_pcell_arfcn,wan_active_band"
 # lte_ca_scell_* pokazuje tylko PIERWSZA nosna dodatkowa, a lte_ca_pcell_arfcn
 # bywa puste - EARFCN PCell siedzi w lte_ca_pcell_freq.
 F="${F},lte_multi_ca_scell_info,lte_ca_pcell_freq,enodeb_id,lte_band,wan_active_channel"
+# `bandwidth` (np. "15MHz") jest wypelnione TAKZE bez agregacji, gdy pola
+# lte_ca_pcell_* sa puste - bez niego nie da sie policzyc sufitu na jednej nosnej.
+F="${F},bandwidth"
 F="${F},Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_CELL_ID,nr5g_pci,nr5g_action_band,nr5g_action_channel"
 F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
 FIELDS="$F"

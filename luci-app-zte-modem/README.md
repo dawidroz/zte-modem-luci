@@ -236,3 +236,38 @@ Rozbiór zweryfikowany wobec panelu MC7010, który pokazuje
 
 ⚠️ **Niespójność do zapamiętania:** `lte_pci` (nośna główna) jest **szesnastkowe**,
 ale PCI wewnątrz `lte_multi_ca_scell_info` jest **dziesiętne**.
+
+### Nośna główna bez agregacji
+
+Wiersz PCell nie może zależeć wyłącznie od `lte_ca_*` — te pola opisują agregację
+i potrafią być puste, gdy jej nie ma. Dlatego widok schodzi po zapasach:
+
+| co | kolejność źródeł |
+|---|---|
+| pasmo | `lte_ca_pcell_band` → `lte_band` → liczba z `wan_active_band` (`"LTE BAND 7"`) |
+| szerokość | `lte_ca_pcell_bandwidth` (`"15.0"`) → liczba z `bandwidth` (`"15MHz"`) |
+| EARFCN | `lte_ca_pcell_freq` → `wan_active_channel` → `lte_ca_pcell_arfcn` |
+
+**`bandwidth` nie jest uniwersalne** — MC888 je wypełnia (`"15MHz"`), MC7010 zwraca
+puste. Jeśli więc modem nie poda szerokości żadnym kanałem, tabela nośnych i tak się
+renderuje (kolumna „Szerokość" = `–`), a zamiast sufitu pojawia się nota o tym, że
+nie da się go policzyć. Wcześniej znikała cała sekcja, co wyglądało na usterkę modułu.
+
+## Różnice między modelami
+
+Zakres pól zależy od firmware'u, nie od zasięgu. Sprawdzone na żywo:
+
+| pole | MC888 | MC7010 |
+|---|---|---|
+| `Z5g_rsrp`, `Z5g_SINR` | ✓ | ✓ |
+| `Z5g_rsrq` | ✓ (`-11`) | **zawsze puste** |
+| `bandwidth` | ✓ (`"15MHz"`) | **zawsze puste** |
+
+MC7010 **nie raportuje RSRQ dla 5G NR** — i nie chodzi o inną nazwę pola:
+`nr5g_rsrq`, `Z5g_RSRQ` i `nr_rsrq` też są puste, a w teście obciążeniowym
+`Z5g_rsrp` i `Z5g_SINR` były wypełnione w 53/53 próbkach przy `Z5g_rsrq` w 0/53.
+
+Dlatego `metric()` zwraca `null` dla pustej wartości, a `block()` odfiltrowuje takie
+kafelki. Metryka, której model nie zna, po prostu nie istnieje na stronie — zamiast
+pustego paska „brak danych", który sugerował awarię łącza. Nie ma tu żadnej listy
+modeli: sterują tym same dane.
