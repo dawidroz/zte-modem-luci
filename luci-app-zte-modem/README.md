@@ -166,8 +166,18 @@ Potwierdzone na urządzeniach:
 | MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | 64 hex | `sha256_sha256` |
 | MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | 64 hex | `sha256_sha256` |
 | MF79U | `MF79U` | `BD_MF79UV1.0.0B03` | **puste** | `b64_plain` |
+| MF297D | `MF297D` | `BD_TELIASEMF297DMODV1.0.1B03` | 64 hex | `sha256_sha256` |
 
-**Rodzina MF nie używa wyzwania.** `cmd=LD` zwraca `""`, a logowanie przechodzi samym
+⚠️ **Nazwa modelu NIE wyznacza rodziny.** MF297D ma w nazwie „MF", ale zachowuje się jak
+seria MC: `cmd=LD` zwraca 64 znaki hex i loguje się wariantem `sha256_sha256`. Wszelkie
+reguły „per rodzina" trzeba więc opierać na zachowaniu, nie na prefiksie nazwy.
+
+⚠️ **`lte_ca_scell_band` = `"0"` przy wyłączonej agregacji.** MF297D zwraca wtedy
+`lte_ca_scell_band: "0"` i `lte_ca_scell_bandwidth: "0.0"` — jako łańcuchy są
+**prawdziwe**, więc zwykłe `if (st.lte_ca_scell_band)` dorzuca widmową nośną
+„B0, 0.0 MHz". Trzeba testować wartością liczbową (`num()`), nie samą obecnością pola.
+
+**MF79U nie używa wyzwania.** `cmd=LD` zwraca `""`, a logowanie przechodzi samym
 `base64(hasło)` — czyli wariantem `b64_plain`, który backend ma już na liście i wykrywa
 sam, bez konfiguracji. Cookie sesji nazywa się `stok`.
 
@@ -272,24 +282,37 @@ ale PCI wewnątrz `lte_multi_ca_scell_info` jest **dziesiętne**.
 
 To najbardziej zdradliwa część tego API. Nie ma pola, które ogłaszałoby system liczbowy.
 
-**`cell_id` jest szesnastkowy na wszystkich sprawdzonych modelach.** Dowód dla MF79U,
-który wygląda na dziesiętny: dwie kolejne próbki `0f2a16` i `0f2a1c` po odczytaniu jako
-hex dają **ten sam eNodeB** (`993814 >> 8 == 993820 >> 8 == 3882`) przy różnych
-sektorach (22 i 28), a ECI 993814 trafia w btsearch (ABC1234, Miasto).
-Jako liczby dziesiętne nie miałyby żadnego związku — a `0f2a1c` nie jest nawet liczbą.
+### `cell_id` — `_cell_base`
 
-**Ale `lte_pci` już nie.** MF79U podaje `205`, co jako hex daje 517 — poza zakresem PCI
-(0–503). Backend rozstrzyga to w `_pci_base` i ogłasza wynik widokowi:
+Kodowanie różni się **między modelami**. Rozstrzyga zakres: ECI ma 28 bitów (max
+268 435 455), więc wartość, która jako hex go przekracza, hexem nie jest.
+
+| model | `cell_id` | rozstrzygnięcie |
+|---|---|---|
+| MC888 | `21ab417` | litera → **hex** (35304471 → btsearch 40213) |
+| MC7010 | `1c59021` | litera → **hex** |
+| MF79U | `0f2a16` / `0f2a1c` | **hex** — obie próbki dają ten sam eNodeB (`>>8` = 3882) przy sektorach 22 i 28, a ECI 993814 trafia w btsearch (ABC1234) |
+| MF297D | `35304501` | jako hex 892355841 **> 268435455** → **dec** (35304501 → btsearch ABC5678) |
+
+Ograniczenie: krótka wartość bez liter, mieszcząca się w zakresie w obu interpretacjach
+(np. `1234567`) — wygrywa hex. Dla 8-cyfrowych ECI dziesiętnych test działa zawsze, bo
+jako hex przekraczają zakres.
+
+### `lte_pci` — `_pci_base`, decyzja OSOBNA
+
+MF79U podaje `cell_id` szesnastkowo, ale PCI dziesiętnie: `205`, co jako hex daje 517 —
+poza zakresem PCI (0–503). Stąd druga, niezależna heurystyka:
 
 | krok | reguła |
 |---|---|
 | 1 | jest litera `a-f` → **hex** |
 | 2 | jako hex > 503 → to nie może być PCI → **dec** |
-| 3 | `model_name` zaczyna się od `MF` → **dec** |
+| 3 | `model_name` zaczyna się od `MF79` → **dec** |
 | 4 | inaczej → **hex** (zgodnie z serią MC) |
 
 Krok 3 jest potrzebny, bo dla wartości typu `100` — bez liter i w zakresie obu
-interpretacji — sam łańcuch nie rozstrzyga.
+interpretacji — sam łańcuch nie rozstrzyga. Zawężony do `MF79*`, bo **sama litera „MF"
+nie oznacza rodziny**: MF297D loguje się dokładnie jak seria MC.
 
 ### eNodeB liczymy sami
 

@@ -143,6 +143,10 @@ function pciHex(st) {
 	return (st && st._pci_base) ? (st._pci_base === 'hex') : true;
 }
 
+function cellHex(st) {
+	return (st && st._cell_base) ? (st._cell_base === 'hex') : true;
+}
+
 function pci(v, hex) {
 	if (!v) return '–';
 	if (hex === false) return txt(v);
@@ -151,8 +155,9 @@ function pci(v, hex) {
 	return dec + ' (0x' + String(v).toLowerCase() + ')';
 }
 
-function cellId(v) {
+function cellId(v, hex) {
 	if (!v) return '–';
+	if (hex === false) return txt(v);
 	var dec = parseInt(String(v), 16);
 	if (isNaN(dec)) return txt(v);
 
@@ -163,11 +168,13 @@ function cellId(v) {
  * MF79U wstawia tam KOPIE cell_id, wiec pokazywalby numer komorki jako numer
  * stacji. Na MC888/MC7010 wyliczona wartosc zgadza sie z tym, co modem podaje
  * sam (0x21ab417 >> 8 = 0x21ab4). Przy okazji widac numer sektora. */
-function enodeb(cid) {
-	var eci = parseInt(String(cid || ''), 16);
+function enodeb(cid, hex) {
+	var eci = (hex === false) ? parseInt(String(cid || ''), 10)
+	                          : parseInt(String(cid || ''), 16);
 	if (isNaN(eci)) return null;
-	var enb = eci >> 8, sec = eci & 0xff;
-	return enb + ' (0x' + enb.toString(16) + ')  ·  ' + _('sektor') + ' ' + sec;
+	var enb = Math.floor(eci / 256), sec = eci % 256;
+	return enb + (hex === false ? '' : ' (0x' + enb.toString(16) + ')') +
+	       '  ·  ' + _('sektor') + ' ' + sec;
 }
 
 function infoTable(rows) {
@@ -341,7 +348,10 @@ function carriers(st) {
 			rows.push({ name: 'SCC' + f[0], band: 'B' + f[3], bw: num(f[5]),
 			            earfcn: f[4], pci: f[1] });
 		});
-	} else if (st.lte_ca_scell_band) {
+	} else if (num(st.lte_ca_scell_band)) {
+		/* Uwaga na `num()`: MF297D przy WYLACZONEJ agregacji zwraca
+		   lte_ca_scell_band "0" i _bandwidth "0.0" - jako lancuchy sa prawdziwe,
+		   wiec zwykly test dorzucalby widmowa nosna "B0, 0.0 MHz". */
 		rows.push({ name: 'SCC1', band: 'B' + st.lte_ca_scell_band,
 		            bw: num(st.lte_ca_scell_bandwidth), earfcn: '–', pci: '–' });
 	}
@@ -467,7 +477,7 @@ function renderStatus(st) {
 	var hasLte = [st.lte_rsrp, st.lte_rsrq, st.lte_rssi, st.lte_snr]
 		.some(function(v) { return num(v) !== null; });
 
-	var hex = pciHex(st);
+	var hex = pciHex(st), chex = cellHex(st);
 
 	if (hasLte) {
 		out.push(block('LTE', [
@@ -487,8 +497,8 @@ function renderStatus(st) {
 		out.push(infoTable([
 			(!hasCarriers && st.wan_active_band) ? [_('Aktywne pasmo'), txt(st.wan_active_band)] : null,
 			(!hasCarriers && st.lte_pci)         ? [_('PCI'), pci(st.lte_pci, hex)] : null,
-			[_('Cell ID'),            cellId(st.cell_id)],
-			enodeb(st.cell_id) ? [_('eNodeB ID'), enodeb(st.cell_id)] : null
+			[_('Cell ID'),            cellId(st.cell_id, chex)],
+			enodeb(st.cell_id, chex) ? [_('eNodeB ID'), enodeb(st.cell_id, chex)] : null
 		]));
 	}
 
@@ -506,7 +516,7 @@ function renderStatus(st) {
 			[_('Pasmo'),    txt(st.nr5g_action_band)],
 			[_('Kanał'),    txt(st.nr5g_action_channel)],
 			[_('PCI'),      pci(st.nr5g_pci, hex)],
-			st.Z5g_CELL_ID ? [_('Cell ID'), cellId(st.Z5g_CELL_ID)] : null
+			num(st.Z5g_CELL_ID) ? [_('Cell ID'), cellId(st.Z5g_CELL_ID, chex)] : null
 		]));
 	}
 

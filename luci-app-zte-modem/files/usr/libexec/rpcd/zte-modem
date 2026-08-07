@@ -179,25 +179,46 @@ _hex2dec() {
 	printf '%d' "0x$1" 2>/dev/null
 }
 
-# W jakim systemie modem podaje PCI?
+# W jakim systemie modem podaje cell_id?
 #
-# UWAGA: kodowanie jest per POLE, nie per urzadzenie. `cell_id` jest
-# szesnastkowe na wszystkich sprawdzonych modelach - dowod dla MF79U: dwie
-# kolejne probki "0f2a16" i "0f2a1c" po odczytaniu jako hex daja ten sam
-# eNodeB (993814>>8 = 993820>>8 = 3882) przy roznych sektorach (22 i 28),
-# a ECI 993814 trafia w btsearch (ABC1234). Jako liczby dziesietne nie
-# mialyby zadnego sensownego zwiazku, a "0f2a1c" nie jest nawet liczba.
+# Kodowanie rozni sie MIEDZY MODELAMI i MIEDZY POLAMI - nie ma pola, ktore by
+# je oglaszalo. Rozstrzygamy zakresem: ECI ma 28 bitow (max 268435455).
 #
-# Ale PCI juz nie: MF79U podaje "205", co jako hex daje 517 - poza zakresem
-# PCI (0-503). Seria MC podaje hex ("14f", "1e3"). Stad:
+#   MC888   "21ab417"  -> litera        -> hex (0x21ab417 = 35304471, trafia w btsearch)
+#   MF79U   "0f2a1c"   -> litera        -> hex (993820; probka "0f2a16" daje ten sam
+#                                          eNodeB 3882, a ECI 993814 trafia w btsearch)
+#   MF297D  "35304501" -> hex = 892355841 > 268435455, czyli NIE ECI -> dec
+#                                         (35304501 trafia w btsearch: ABC5678)
+#
+# Ograniczenie: krotka wartosc bez liter, miesci sie w zakresie w obu
+# interpretacjach (np. "1234567") - wygrywa hex. Dla 8-cyfrowych ECI
+# dziesietnych test dziala, bo jako hex zawsze przekraczaja zakres.
+_cell_base() { # $1=cell_id
+	local c
+
+	case "$1" in
+		*[a-fA-F]*) echo hex; return ;;
+	esac
+
+	c="$(_hex2dec "$1")"
+	[ -n "$c" ] && [ "$c" -gt 268435455 ] && { echo dec; return; }
+
+	echo hex
+}
+
+# W jakim systemie modem podaje PCI? To OSOBNA decyzja niz cell_id - MF79U
+# podaje cell_id szesnastkowo, a PCI dziesietnie ("205", jako hex 517, poza
+# zakresem PCI 0-503). Seria MC podaje hex ("14f", "1e3"). Stad:
 #
 #   1. jest litera a-f      -> hex
 #   2. jako hex > 503       -> to nie moze byc PCI -> dec
-#   3. model z rodziny MF   -> dec (MF79U potwierdzony)
+#   3. model MF79*          -> dec (MF79U potwierdzony)
 #   4. inaczej              -> hex (zachowanie zgodne z seria MC)
 #
 # Punkt 3 jest potrzebny, bo dla wartosci typu "100" bez liter i w zakresie
-# obu interpretacji sam lancuch nie rozstrzyga.
+# obu interpretacji sam lancuch nie rozstrzyga. Zawezony do MF79*, bo sama
+# litera "MF" NIE oznacza rodziny: MF297D loguje sie jak seria MC
+# (LD 64 hex, sha256_sha256), wiec z nazwy nie wynika nic pewnego.
 _pci_base() { # $1=lte_pci $2=model_name
 	local p
 
@@ -209,7 +230,7 @@ _pci_base() { # $1=lte_pci $2=model_name
 	[ -n "$p" ] && [ "$p" -gt 503 ] && { echo dec; return; }
 
 	case "$2" in
-		MF*|mf*) echo dec; return ;;
+		MF79*|mf79*) echo dec; return ;;
 	esac
 
 	echo hex
@@ -273,7 +294,7 @@ _refresh() {
 	fi
 
 	# --- identyfikatory i stacja bazowa ----------------------------------
-	local cid pciv model pcibase dec f
+	local cid pciv model pcibase cellbase dec f
 	local bts_station="" bts_operator="" bts_city="" bts_addr=""
 	local bts_lat="" bts_lon=""
 
@@ -281,11 +302,15 @@ _refresh() {
 	pciv="$(printf '%s'  "$data" | jsonfilter -q -e '@.lte_pci')"
 	model="$(printf '%s' "$data" | jsonfilter -q -e '@.model_name')"
 	pcibase="$(_pci_base "$pciv" "$model")"
+	cellbase="$(_cell_base "$cid")"
 
-	# cell_id jest szesnastkowe na wszystkich sprawdzonych modelach (patrz
-	# komentarz przy _pci_base). btsearch szuka po ECI dziesietnym.
+	# btsearch szuka po ECI dziesietnym - konwertujemy wg wykrytego kodowania.
 	if [ "$BTS_LOOKUP" = "1" ] && [ -n "$cid" ]; then
-		dec="$(_hex2dec "$cid")"
+		if [ "$cellbase" = "hex" ]; then
+			dec="$(_hex2dec "$cid")"
+		else
+			dec="$cid"
+		fi
 		if [ -n "$dec" ]; then
 			f="${BTS_CACHE}.${dec}.json"
 			[ -s "$f" ] || _bts_fetch "$dec" "$f"
@@ -307,7 +332,8 @@ _refresh() {
 	json_add_boolean "_authenticated" "$authed"
 	json_add_boolean "_stale" 0
 	json_add_string  "_variant" "${variant:-}"
-	json_add_string  "_pci_base" "$pcibase"
+	json_add_string  "_pci_base"  "$pcibase"
+	json_add_string  "_cell_base" "$cellbase"
 	[ -n "$dec" ]          && json_add_string "_cell_dec"     "$dec"
 	[ -n "$bts_station" ]  && json_add_string "_bts_station"  "$bts_station"
 	[ -n "$bts_operator" ] && json_add_string "_bts_operator" "$bts_operator"
