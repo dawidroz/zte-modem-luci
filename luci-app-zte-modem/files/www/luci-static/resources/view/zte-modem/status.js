@@ -213,6 +213,34 @@ function station(st) {
  * lte_ca_scell_band/_bandwidth pokazuje tylko PIERWSZA nosna dodatkowa -
  * sluzy wylacznie jako zapas dla firmware'ow bez lte_multi_ca_scell_info.
  */
+/* Szerokosc kanalu -> liczba blokow zasobow (RB) wg tabeli LTE. */
+var RB_PER_MHZ = { '1.4': 6, '3': 15, '5': 25, '10': 50, '15': 75, '20': 100 };
+
+function rbFor(bw) {
+	var n = num(bw);
+	if (n === null) return 0;
+	var key = (Math.abs(n - 1.4) < 0.05) ? '1.4' : String(Math.round(n));
+	return RB_PER_MHZ[key] || 0;
+}
+
+/* Sufit warstwy fizycznej.
+ *
+ * Jeden RB to 12 podnosnych x 14 symboli = 168 elementow zasobow na ms;
+ * ~25% zjada narzut (sygnaly referencyjne, PDCCH, synchronizacja), zostaje 126.
+ *
+ * Zalozenia 64QAM (6 bitow) i 2 strumienie sa PODANE WPROST w opisie, bo modem
+ * nie udostepnia modulacji ani MIMO - pola cqi/dl_mcs/rank/mimo/lte_category
+ * wracaja puste. To maksimum teoretyczne, nie prognoza: pomiar na MC7010 dal
+ * 83 Mb/s przy sufitcie 378 Mb/s, czyli 22%.
+ *
+ * Swiadomie NIE liczymy tu szacunku z SINR. Pole `lte_snr` z ZTE nie jest
+ * efektywnym SINR-em po equalizacji - oszacowanie z podrecznikowej krzywej
+ * wyszlo 6,4x ponizej zmierzonej wartosci.
+ */
+function ceiling(rb) {
+	return rb * 126 * 6 * 2 / 1000;   /* Mb/s */
+}
+
 function carriers(st) {
 	var rows = [];
 
@@ -248,6 +276,8 @@ function carriers(st) {
 		return a + (isNaN(n) ? 0 : n);
 	}, 0);
 
+	var rb = rows.reduce(function(a, r) { return a + rbFor(r[2]); }, 0);
+
 	var head = E('tr', { 'class': 'tr table-titles' },
 		[_('Nośna'), _('Pasmo'), _('Szerokość'), 'EARFCN', 'PCI'].map(function(h) {
 			return E('th', { 'class': 'th left' }, h);
@@ -264,7 +294,18 @@ function carriers(st) {
 		total > 0
 			? E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' },
 				_('Łączna szerokość') + ': ' + total.toFixed(1) + ' MHz  ·  ' +
-				rows.length + '×CA')
+				rows.length + '×CA' + (rb ? '  ·  ' + rb + ' RB' : ''))
+			: '',
+		rb > 0
+			? E('div', { 'style': 'font-size:.85em;opacity:.7' }, [
+				_('Sufit teoretyczny') + ': ~' + Math.round(ceiling(rb)) + ' Mb/s ',
+				E('span', {
+					'style': 'opacity:.8;cursor:help',
+					'title': _('Maksimum warstwy fizycznej przy założeniu 64QAM i 2 strumieni MIMO. ' +
+					           'Modem nie podaje modulacji ani MIMO, więc to górne ograniczenie, ' +
+					           'a nie prognoza — realny transfer bywa rzędu 20–30% tej wartości.')
+				}, _('(64QAM 2×2, wartość graniczna)'))
+			])
 			: ''
 	]);
 }
