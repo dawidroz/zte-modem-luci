@@ -298,6 +298,17 @@ Ograniczenie: krótka wartość bez liter, mieszcząca się w zakresie w obu int
 (np. `1234567`) — wygrywa hex. Dla 8-cyfrowych ECI dziesiętnych test działa zawsze, bo
 jako hex przekraczają zakres.
 
+✅ **Kontrola krzyżowa, która domyka sprawę.** MF297D podpięty pod Zyxel zameldował się
+na tym samym maszcie co MC888 na R2. MC888 podaje `21ab417` (hex) → ECI 35304471 →
+**eNodeB 137908**, sektor 23. MF297D podaje `35304501` (dec) → **eNodeB 137908**,
+sektor 53. Ten sam maszt, dwa modemy, dwa różne kodowania, ten sam wynik — i oba
+trafiają w btsearch (stacja 40213, ul. Przykladowa 1).
+
+⚠️ Zanim modem się zarejestruje (`ppp_disconnected`), `cell_id` bywa **niepełny** —
+MF297D pokazywał wtedy `60213`, wartość na tyle krótką, że heurystyka wybrała hex.
+Nic z tego nie wynika: przy takiej wartości btsearch i tak nie trafia w żadną
+interpretację, a po zestawieniu połączenia pole wraca do pełnej postaci.
+
 ### `lte_pci` — `_pci_base`, decyzja OSOBNA
 
 MF79U podaje `cell_id` szesnastkowo, ale PCI dziesiętnie: `205`, co jako hex daje 517 —
