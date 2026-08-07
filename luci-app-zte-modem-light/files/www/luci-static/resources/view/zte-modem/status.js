@@ -77,12 +77,6 @@ function bytes(v) {
 	return n.toFixed(i ? 2 : 0) + ' ' + u[i];
 }
 
-function rate(v) {
-	var n = num(v);
-	if (n === null) return '–';
-	return bytes(n) + '/s';
-}
-
 function quality(kind, v) {
 	var t = TIERS[kind], n = num(v);
 	if (!t || n === null) return null;
@@ -336,7 +330,9 @@ function bwOf(st) {
 	return m ? num(m[1]) : null;
 }
 
-function carriers(st) {
+/* Rozbior nosnych na wiersze. Wydzielone z `carriers()`, bo sufit teoretyczny
+   liczy z tego takze zakladka Transfer - skalujemy nim paski predkosci. */
+function carrierRows(st) {
 	var rows = [];
 
 	/* PCI nosnej glownej - w tym samym kodowaniu co reszta identyfikatorow.
@@ -372,6 +368,19 @@ function carriers(st) {
 		rows.push({ name: 'SCC1', band: 'B' + st.lte_ca_scell_band,
 		            bw: num(st.lte_ca_scell_bandwidth), earfcn: '–', pci: '–' });
 	}
+
+	return rows;
+}
+
+/* Sufit warstwy fizycznej dla calego lacza, albo null gdy modem nie podaje
+   szerokosci zadnej nosnej (MC7010 zwraca puste `bandwidth`). */
+function ceilingOf(st) {
+	var rb = carrierRows(st).reduce(function(a, r) { return a + rbFor(r.bw); }, 0);
+	return rb > 0 ? ceiling(rb) : null;
+}
+
+function carriers(st) {
+	var rows = carrierRows(st);
 
 	if (!rows.length)
 		return E('div', {});
@@ -550,16 +559,18 @@ function renderStatus(st) {
 	return out;
 }
 
-/* Duza liczba z podpisem - do kafelkow transferu (bez paska jakosci). */
-function figure(label, value, sub) {
-	return E('div', {
-		'style': 'flex:1 1 170px;min-width:170px;padding:12px;' +
-		         'border:1px solid var(--border-color-low,#ccc);border-radius:6px'
-	}, [
-		E('div', { 'style': 'font-size:.85em;opacity:.75' }, label),
-		E('div', { 'style': 'font-size:1.5em;font-weight:600;margin:.15em 0' }, value),
-		sub ? E('div', { 'style': 'font-size:.8em;opacity:.6' }, sub) : ''
-	]);
+/* Kierunek transferu to nie jakosc, wiec swiadomie NIE uzywamy tu palety
+   good/ok/poor - zielony przy transferze czytalby sie jako ocena. */
+var DIR = { rx: '#3f8ed0', tx: '#7e57c2' };
+
+var ARROW = { rx: '↓', tx: '↑' };
+
+/* Predkosc w Mb/s (bity), a nie MiB/s - w tej jednostce podany jest sufit
+   teoretyczny i w niej podaje sie przepustowosc lacza, wiec paski i liczby
+   daja sie ze soba porownac. Modem raportuje bajty na sekunde. */
+function mbps(v) {
+	var n = num(v);
+	return (n === null) ? null : n * 8 / 1e6;
 }
 
 function footer(st) {
@@ -571,28 +582,132 @@ function footer(st) {
 		' · ' + _('odczyt') + ': ' + when);
 }
 
+/* Naglowek sekcji z opcjonalna adnotacja dosunieta do prawej (np. czas trwania
+   polaczenia). Zwykly <h4> jak w reszcie strony, zeby zakladki sie nie rozjechaly. */
+function sectionHead(title, note) {
+	return E('div', {
+		'style': 'display:flex;align-items:baseline;justify-content:space-between;' +
+		         'gap:1em;margin:1.4em 0 .5em'
+	}, [
+		E('h4', { 'style': 'margin:0' }, title),
+		note ? E('div', { 'style': 'font-size:.85em;opacity:.65' }, note) : ''
+	]);
+}
+
+/* Karta licznika: suma na pierwszym planie, pod nia pasek podzialu rx/tx,
+   pod paskiem rozbicie na kierunki.
+ *
+ * Zwraca null, gdy modem nie wypelnia tej pary pol - tak samo jak `metric()`
+ * przy metrykach sygnalu. Pusta karta "–/–" sugerowalaby awarie lacza, a to
+ * zwykle po prostu firmware, ktory takich licznikow nie ma (realtime_*_bytes). */
+function counterCard(rxRaw, txRaw) {
+	var rx = num(rxRaw), tx = num(txRaw);
+	if (rx === null && tx === null) return null;
+
+	var total = (rx || 0) + (tx || 0);
+	var rxPct = total > 0 ? (rx || 0) / total * 100 : 0;
+
+	var seg = function(kind, pct) {
+		return E('div', {
+			'style': 'width:' + pct.toFixed(1) + '%;background:' + DIR[kind] +
+			         ';height:100%'
+		});
+	};
+
+	var leg = function(kind, raw, label) {
+		return E('div', { 'style': 'display:flex;align-items:center;gap:.4em' }, [
+			E('span', { 'style': 'color:' + DIR[kind] + ';font-weight:700' }, ARROW[kind]),
+			E('span', { 'style': 'font-weight:600' }, bytes(raw)),
+			E('span', { 'style': 'opacity:.6' }, label)
+		]);
+	};
+
+	return E('div', {
+		'style': 'padding:14px 16px;border:1px solid var(--border-color-low,#ccc);' +
+		         'border-radius:8px;background:var(--background-color-medium,transparent)'
+	}, [
+		E('div', {
+			'style': 'display:flex;align-items:baseline;justify-content:space-between;gap:1em'
+		}, [
+			E('div', { 'style': 'font-size:.85em;opacity:.75' }, _('Razem')),
+			E('div', { 'style': 'font-size:1.6em;font-weight:600;line-height:1.1' },
+				bytes(total))
+		]),
+
+		/* Wlasny pasek zamiast .cbi-progressbar: ten renderuje JEDNO wypelnienie,
+		   a tu potrzebne sa dwa segmenty stykajace sie ze soba. */
+		E('div', {
+			'style': 'display:flex;height:10px;border-radius:5px;overflow:hidden;' +
+			         'margin:.7em 0 .5em;background:var(--border-color-low,#e0e0e0)',
+			'title': total > 0 ? _('pobrane') + ' ' + Math.round(rxPct) + '%' : ''
+		}, total > 0 ? [ seg('rx', rxPct), seg('tx', 100 - rxPct) ] : []),
+
+		E('div', {
+			'style': 'display:flex;flex-wrap:wrap;gap:.4em 1.5em;font-size:.9em'
+		}, [
+			leg('rx', rx, _('pobrane')),
+			leg('tx', tx, _('wysłane'))
+		])
+	]);
+}
+
+/* Kafelek predkosci. Pasek pokazuje udzial w sufcie teoretycznym - bez sufitu
+   (modele bez `bandwidth`) zostaje sama liczba, zamiast paska bez skali. */
+function speedTile(kind, label, raw, ceil) {
+	var v = mbps(raw);
+
+	var body = [
+		E('div', { 'style': 'font-size:.85em;opacity:.75' },
+			ARROW[kind] + ' ' + label),
+		E('div', { 'style': 'font-size:1.5em;font-weight:600;margin:.1em 0 .2em' },
+			v === null ? '–' : v.toFixed(1) + ' Mb/s')
+	];
+
+	if (v !== null && ceil) {
+		var pct = Math.max(0, Math.min(100, v / ceil * 100));
+		body.push(E('div', {
+			'style': 'height:8px;border-radius:4px;overflow:hidden;margin:.2em 0 .35em;' +
+			         'background:var(--border-color-low,#e0e0e0)'
+		}, E('div', {
+			'style': 'width:' + pct.toFixed(1) + '%;height:100%;background:' + DIR[kind]
+		})));
+		body.push(E('div', { 'style': 'font-size:.8em;opacity:.6' },
+			Math.round(pct) + '% ' + _('z sufitu') + ' ' + Math.round(ceil) + ' Mb/s'));
+	}
+
+	return E('div', {
+		'style': 'flex:1 1 190px;min-width:190px;padding:12px 14px;' +
+		         'border:1px solid var(--border-color-low,#ccc);border-radius:8px'
+	}, body);
+}
+
 function renderTransfer(st) {
 	st = st || {};
 	var out = [];
 
-	var rx = num(st.monthly_rx_bytes);
-	var tx = num(st.monthly_tx_bytes);
-	var total = (rx !== null && tx !== null) ? (rx + tx) : null;
+	var monthly = counterCard(st.monthly_rx_bytes, st.monthly_tx_bytes);
+	var session = counterCard(st.realtime_rx_bytes, st.realtime_tx_bytes);
 
-	out.push(E('h4', { 'style': 'margin:.3em 0 .5em' }, _('Licznik miesięczny')));
-	out.push(E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:8px' }, [
-		figure(_('Pobrane'), bytes(st.monthly_rx_bytes)),
-		figure(_('Wysłane'), bytes(st.monthly_tx_bytes)),
-		figure(_('Razem'),   total !== null ? bytes(total) : '–',
-			(total !== null && rx !== null && total > 0)
-				? _('pobieranie stanowi') + ' ' + Math.round(rx / total * 100) + '%'
-				: null)
-	]));
+	if (!monthly && !session)
+		out.push(banner(_('Modem nie zwrócił żadnych liczników transferu.'), COLORS.ok));
 
-	out.push(E('h4', { 'style': 'margin:1.2em 0 .5em' }, _('Prędkość chwilowa')));
+	if (monthly) {
+		out.push(sectionHead(_('Licznik miesięczny')));
+		out.push(monthly);
+	}
+
+	/* Liczniki biezacej sesji ma tylko czesc firmware'ow - gdy ich nie ma,
+	   sekcja po prostu nie powstaje (ta sama zasada co przy metrykach sygnalu). */
+	if (session) {
+		out.push(sectionHead(_('Bieżące połączenie'), duration(st.realtime_time)));
+		out.push(session);
+	}
+
+	var ceil = ceilingOf(st);
+	out.push(sectionHead(_('Prędkość chwilowa')));
 	out.push(E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:8px' }, [
-		figure(_('Pobieranie'), rate(st.realtime_rx_thrpt)),
-		figure(_('Wysyłanie'),  rate(st.realtime_tx_thrpt))
+		speedTile('rx', _('Pobieranie'), st.realtime_rx_thrpt, ceil),
+		speedTile('tx', _('Wysyłanie'),  st.realtime_tx_thrpt, ceil)
 	]));
 
 	out.push(E('div', {

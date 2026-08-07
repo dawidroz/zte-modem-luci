@@ -12,7 +12,7 @@ interfejs**.
 | zakładka | zawartość |
 |---|---|
 | **Status** | RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, identyfikacja stacji bazowej |
-| **Transfer** | liczniki miesięczne i prędkość chwilowa z modemu |
+| **Transfer** | licznik miesięczny i bieżącego połączenia z podziałem pobrane/wysłane, prędkość chwilowa skalowana sufitem teoretycznym |
 | **Modem** | model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
 | **Konfiguracja** | adres modemu, hasło, interwał, test logowania |
 

@@ -49,6 +49,10 @@ F="${F},lte_multi_ca_scell_info,lte_ca_pcell_freq,enodeb_id,lte_band,wan_active_
 F="${F},bandwidth"
 F="${F},Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_CELL_ID,nr5g_pci,nr5g_action_band,nr5g_action_channel"
 F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
+# Liczniki biezacego polaczenia (zeruja sie przy zestawieniu sesji PPP, w
+# odroznieniu od monthly_*, ktore chodza wg cyklu rozliczeniowego modemu).
+# Nie kazdy firmware je wypelnia - widok pomija sekcje, gdy sa puste.
+F="${F},realtime_tx_bytes,realtime_rx_bytes"
 # Tozsamosc urzadzenia, karty SIM i polaczenia - zakladka "Modem".
 # Swiadomie NIE pobieramy msisdn, sim_card_status, sim_slot ani mac_address:
 # sa puste na wszystkich trzech sprawdzonych modemach. Stan karty czytamy

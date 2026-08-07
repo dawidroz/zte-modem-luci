@@ -54,6 +54,26 @@ a poza tym `67` i `71` — ta sama wielkość, raz ze znakiem, raz bez. RSSI w L
 zawsze ujemne (praktycznie −110…−40 dBm), więc widok normalizuje do `-|v|`. Dla
 poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 
+## Liczniki transferu
+
+| pole | znaczenie |
+|---|---|
+| `monthly_rx_bytes` / `monthly_tx_bytes` | licznik miesięczny, zeruje się wg **cyklu rozliczeniowego modemu** |
+| `realtime_rx_bytes` / `realtime_tx_bytes` | bajty bieżącego połączenia, zerują się przy zestawieniu sesji |
+| `realtime_rx_thrpt` / `realtime_tx_thrpt` | prędkość chwilowa w **bajtach na sekundę** |
+| `realtime_time` | czas trwania bieżącego połączenia [s] |
+
+⚠️ Liczniki są **modemu, nie routera** — nie zgadzają się z ruchem mierzonym na
+interfejsie WAN i nie da się ich wyzerować z poziomu modułu (zakres tylko do odczytu).
+
+⚠️ `realtime_*_bytes` **nie są jeszcze zweryfikowane per model** — dopisane do listy
+pól później niż reszta. Widok pomija sekcję „Bieżące połączenie", gdy obie wartości są
+puste, więc firmware bez tych liczników degraduje się cicho. Przy okazji profilowania
+kolejnego modemu warto uzupełnić tę tabelę.
+
+⚠️ `realtime_*_thrpt` podaje **bajty/s**, a nie bity — widok mnoży przez 8, żeby pokazać
+Mb/s porównywalne z sufitem teoretycznym.
+
 ## Tożsamość urządzenia i karty SIM
 
 | pole | MC888 | MC7010 | MF297D |
