@@ -123,8 +123,14 @@ POST /goform/goform_set_cmd_process
     -> {"result":"0"}                           "0" = sukces
 
 GET /goform/goform_get_cmd_process?isTest=false&multi_data=1&cmd=pole1,pole2,…
-GET …?isTest=false&cmd=loginfo -> {"loginfo":"ok"}   sprawdzenie sesji
 ```
+
+> ⚠️ **`cmd=loginfo` NIE służy do sprawdzania sesji.** Wbrew nazwie zwraca
+> `{"loginfo":"ok"}` **także bez cookie** — sprawdzone na MC888 i MC7010. Backend opierał
+> na nim detekcję sesji i przez to nigdy się nie logował: `_authenticated: true` przy
+> kompletnie pustych metrykach. Jedyny wiarygodny test to odczyt pola dostępnego wyłącznie
+> po zalogowaniu (`lte_rsrp`, `Z5g_rsrp`, `cell_id`, `wan_ipaddr` — kilku naraz, bo
+> pojedyncze bywa puste z innych powodów).
 
 Wszystkie zapytania wymagają nagłówka `Referer: http://<modem>/index.html`.
 
@@ -158,8 +164,8 @@ przechodzi przez pozostałe. Ręczna diagnostyka: `ubus call zte-mc888 probe`.
 CPE ZTE dopuszczają zwykle **jedną sesję administratora naraz**. Logowanie przy każdym
 odpytaniu wyrzucałoby użytkownika z panelu modemu co kilka sekund. Dlatego backend:
 
-- **reużywa cookie** z `/tmp/zte-mc888.cookie`; loguje się dopiero gdy `cmd=loginfo`
-  przestanie zwracać `ok`,
+- **reużywa cookie** z `/tmp/zte-mc888.cookie`; loguje się dopiero gdy modem przestanie
+  zwracać pola wymagające sesji (patrz ostrzeżenie o `loginfo` wyżej),
 - **cache'uje odpowiedź** w `/tmp/zte-mc888.json` — N otwartych kart LuCI to nadal
   **jedno** zapytanie do modemu na `refresh_interval`,
 - **serializuje** równoległe wywołania przez `flock` na `/tmp/zte-mc888.lock`,
