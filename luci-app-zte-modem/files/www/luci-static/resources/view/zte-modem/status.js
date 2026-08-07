@@ -766,10 +766,9 @@ return view.extend({
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
 
-		var m = new form.Map('zte-modem', _('Modem ZTE'),
-			/* Bez "5G" w opisie: obslugiwane modemy bywaja LTE-only (MF297D, MF79U),
-			   wiec obietnica 5G wprowadzalaby w blad. */
-			_('Monitoring sygnału modemu ZTE stanowiącego łącze WAN tego routera.'));
+		/* Bez podtytulu: model, adres i firmware sa w stopce kazdej zakladki,
+		   wiec zdanie opisowe tylko powtarzalo to, co widac nizej. */
+		var m = new form.Map('zte-modem', _('Modem ZTE'));
 
 		/* Przy m.tabbed kazda sekcja = osobna zakladka. data-tab bierze sie z
 		   sectiontype, wiec obie sekcje MUSZA miec rozny sectiontype. */
