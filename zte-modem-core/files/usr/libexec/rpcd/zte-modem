@@ -44,6 +44,11 @@ F="${F},lte_ca_scell_bandwidth,lte_ca_pcell_arfcn,wan_active_band"
 # lte_ca_scell_* pokazuje tylko PIERWSZA nosna dodatkowa, a lte_ca_pcell_arfcn
 # bywa puste - EARFCN PCell siedzi w lte_ca_pcell_freq.
 F="${F},lte_multi_ca_scell_info,lte_ca_pcell_freq,enodeb_id,lte_band,wan_active_channel"
+# Komorki sasiednie: "EARFCN,PCI,RSRQ,RSRP,RSSI" rozdzielone ';', PCI DZIESIETNE
+# (tak samo jak w lte_multi_ca_scell_info, w odroznieniu od lte_pci). Pierwszy
+# wpis to komorka obslugujaca - potwierdzone na MC888 i MC7010, gdzie zgadza sie
+# z lte_pci i lte_ca_pcell_freq. Rozbior robi widok, tak jak dla CA.
+F="${F},ngbr_cell_info"
 # `bandwidth` (np. "15MHz") jest wypelnione TAKZE bez agregacji, gdy pola
 # lte_ca_pcell_* sa puste - bez niego nie da sie policzyc sufitu na jednej nosnej.
 F="${F},bandwidth"

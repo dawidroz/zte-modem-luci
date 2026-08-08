@@ -4,15 +4,35 @@
 projektowe, żeby nie odtwarzać ich od zera przy starcie prac.
 
 Wersja działająca dziś to [`luci-app-zte-modem-light`](../luci-app-zte-modem-light/) —
-cztery zakładki, tylko odczyt, zero zapisu do flasha. Jej zakres jest **zamknięty**
+trzy zakładki, tylko odczyt, zero zapisu do flasha. Jej zakres jest **zamknięty**
 i nie należy do niej dokładać rzeczy z listy poniżej.
 
 ## Co ma dojść ponad wersję light
 
+- **zakładka Transfer** — licznik miesięczny i bieżącej sesji z podziałem pobrane/wysłane,
+  prędkość chwilowa skalowana sufitem teoretycznym
 - historia sygnału (RSRP/RSRQ/SINR w czasie)
 - wykresy
 - statystyki transferu dłuższe niż licznik miesięczny modemu
 - prawdopodobnie: log zmian komórki / stacji bazowej
+
+### Transfer — kod już był, jest w historii
+
+Zakładka Transfer działała w wersji light i została stamtąd **wyjęta**, a nie napisana
+od nowa. Punkt wyjścia: commit `fbde1c1` (`Zakladka Transfer: hierarchia, podzial rx/tx
+i skala predkosci`) i usunięcie w bieżącej gałęzi.
+
+```sh
+git show fbde1c1 -- luci-app-zte-modem-light/files/www/luci-static/resources/view/zte-modem/status.js
+```
+
+Do przeniesienia razem z nią: `counterCard()`, `speedTile()`, `sectionHead()`, `mbps()`,
+`bytes()`, `ceilingOf()` oraz stałe `DIR` / `ARROW`. **`ceilingOf()` musi wrócić razem
+z poprawką duplikatu PCell** z `carrierRows()` — bez niej sufit skalujący paski prędkości
+jest na MC888 zawyżony o 43% (patrz [`../docs/modele.md`](../docs/modele.md)).
+
+Pola `monthly_*` i `realtime_*` są nadal pobierane przez core, więc backendu nie trzeba
+ruszać — dane czekają w `ubus call zte-modem status`.
 
 ## Ustalenia projektowe
 

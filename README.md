@@ -13,8 +13,8 @@ których przy CPE po Ethernecie po prostu nie ma.
 | katalog | rola |
 |---|---|
 | [`zte-modem-core/`](zte-modem-core/) | **backend** — obiekt ubus `zte-modem`, bez interfejsu |
-| [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 4 zakładki, tylko odczyt, zero zapisu do flasha |
-| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — historia sygnału i wykresy, *planowana* |
+| [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 3 zakładki (Status, Modem, Konfiguracja), tylko odczyt, zero zapisu do flasha |
+| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — transfer, historia sygnału i wykresy, *planowana* |
 | [`docs/`](docs/) | dokumentacja protokołu, wspólna dla obu wersji |
 
 Widoki dzielą całą logikę odczytu, dlatego backend jest osobnym pakietem — a nie
@@ -39,6 +39,100 @@ ustawia się je w LuCI (**Services → Modem ZTE → Konfiguracja**).
 Zakres modułów to **tylko odczyt**: żadnego restartu, SMS-ów ani blokowania pasm. Dzięki
 temu niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć routera od sieci.
 
+## Instalujesz u siebie?
+
+Zacznij od [`docs/instalacja-i-diagnostyka.md`](docs/instalacja-i-diagnostyka.md) —
+wymagania, kolejność instalacji, pięć najczęstszych przyczyn „nie działa" (cztery z nich
+to nie usterka modułu) oraz `scripts/diag.sh`, który zbiera komplet danych do zgłoszenia
+z **zredagowanym** IMEI, ICCID, Cell ID i hasłem.
+
+## Pakiety instalacyjne
+
+```sh
+./scripts/build-pkg.sh                       # .ipk + .apk, oba pakiety -> build/
+./scripts/build-pkg.sh --format ipk          # tylko .ipk
+./scripts/build-pkg.sh --pkg zte-modem-core  # tylko wybrany
+```
+
+Pakiety są architektury **`all`** — to sam kod w shellu i JS, nic się nie kompiluje, więc
+**SDK OpenWrt nie jest potrzebny**. Metadane każdego pakietu leżą w jego pliku `pkginfo`.
+
+| format | dla kogo | czym budowane |
+|---|---|---|
+| `.ipk` | OpenWrt ≤ 24.10 (opkg) | lokalnie, `tar` + `gzip` |
+| `.apk` | OpenWrt z apk | `apk mkpkg` w kontenerze (podman albo docker) |
+
+Instalacja na routerze:
+
+```sh
+opkg install zte-modem-core_1.0.0-r1_all.ipk luci-app-zte-modem-light_1.0.0-r1_all.ipk
+apk add --allow-untrusted zte-modem-core-1.0.0-r1.apk luci-app-zte-modem-light-1.0.0-r1.apk
+```
+
+⚠️ **Podawać oba pakiety naraz** — instalowane osobno, widok nie znajdzie jeszcze
+`zte-modem-core` i opkg przerwie z mylącym błędem o niezgodnej architekturze.
+
+⚠️ **`.apk` jest niepodpisany**, stąd `--allow-untrusted`. Podpisywanie ma sens dopiero
+przy własnym repozytorium.
+
+⚠️ `/etc/config/zte-modem` trzyma hasło do modemu. W `.ipk` jest zadeklarowany jako
+`conffiles`, więc opkg **nie nadpisze** zmienionego pliku przy aktualizacji. Przy
+**pierwszej** instalacji na routerze, gdzie plik powstał wcześniej przez `deploy.sh`
+(czyli nie należy do żadnego pakietu), zostanie **zastąpiony** — hasło trzeba wtedy
+ustawić ponownie.
+
+### Zależności — co się stanie, gdy czegoś zabraknie
+
+Oba formaty deklarują zależności i **oba menedżery ich pilnują**. Sprawdzone doświadczalnie
+pakietem testowym z celowo nieistniejącą zależnością:
+
+| | opkg (OpenWrt 24.10.2) | apk (apk-tools 3.0.7) |
+|---|---|---|
+| instalacja | **odmawia** | **odmawia** |
+| kod wyjścia | 255 | 2 |
+| pliki na dysku | **żadne** | **żadne** |
+| stan pakietu | niezainstalowany | niezainstalowany |
+
+Nic nie ląduje w połowie — to instalacja „wszystko albo nic", nie ma stanu pośredniego.
+
+⚠️ **Komunikat opkg jest mylący.** Przy brakującej zależności wypisuje *trzy* błędy,
+a decydujący jest **pierwszy**:
+
+```
+* pkg_hash_check_unresolved: cannot find dependency <pakiet> for zte-modem-core   <- prawdziwa przyczyna
+* pkg_hash_fetch_best_installation_candidate: ... incompatible with the architectures configured
+* opkg_install_cmd: Cannot install package zte-modem-core.
+```
+
+Zdanie o **niezgodnej architekturze jest fałszywym tropem** — `arch all` jest obsługiwane
+(`opkg print-architecture` pokazuje je z priorytetem 1). To ten sam komunikat, który
+pojawia się przy instalowaniu samego widoku bez `zte-modem-core`.
+
+⚠️ **`--force-depends` tego nie obchodzi** — sprawdzone prawdziwą instalacją: opkg
+przerywa na etapie rozwiązywania zależności, zanim dojdzie do wymuszania. Jedyne wyjście
+to doinstalować brakujący pakiet: `opkg update && opkg install <pakiet>`.
+
+W praktyce nie powinno zaboleć: wszystkie zależności (`curl`, `ucode`, `jshn`,
+`jsonfilter`, `rpcd`, `luci-base`) są na standardowym OpenWrt z LuCI — potwierdzone na
+obu testowych routerach.
+
+⚠️⚠️ **Czego zależności NIE złapią: pakiet obecny, ale niedziałający.** Udokumentowany
+przypadek z tego projektu to `curl` w wersji niedopasowanej do `libcurl4`
+(`Error relocating: curl_multi_notify_enable: symbol not found`) — pakiet jest
+zainstalowany, zależność spełniona, a binarka nie startuje i moduł nie dostaje żadnych
+danych. Dlatego przy diagnostyce **uruchamiać `curl --version`**, a nie sprawdzać samą
+obecność pakietu (patrz [`docs/goform-api.md`](docs/goform-api.md#zależności-na-routerze)).
+
+### Co jest sprawdzone, a co nie
+
+✅ `.ipk` — zweryfikowany prawdziwym `opkg install --noaction` na OpenWrt 24.10.2
+(aarch64), oba pakiety naraz, bez błędów.
+
+⚠️ `.apk` — zweryfikowany **tylko strukturalnie**: `apk adbdump` z apk-tools 3.0.7 czyta
+metadane, zależności, tryby plików i własność `root:root`. **Nie sprawdzony instalacją na
+prawdziwym OpenWrt z apk**, bo oba dostępne routery są na opkg. Gdyby tamtejsze apk
+odrzuciło format, jest przełącznik `--apk-compat` (np. `--apk-compat 3.0.0_pre3`).
+
 ## Sprawdzone modemy
 
 | model | logowanie | `cmd=LD` | uwagi |
@@ -61,6 +155,7 @@ bramą domyślną routera.
 | [`docs/modele.md`](docs/modele.md) | profile pól per model, tożsamość i SIM, agregacja nośnych |
 | [`docs/kodowanie-pol.md`](docs/kodowanie-pol.md) | hex vs. dec per pole, eNodeB, pasmo z EARFCN |
 | [`docs/btsearch.md`](docs/btsearch.md) | rozpoznawanie stacji bazowej, cache, wyłącznik |
+| [`docs/instalacja-i-diagnostyka.md`](docs/instalacja-i-diagnostyka.md) | **dla instalującego u siebie** — wymagania, pięć rzeczy do sprawdzenia, co podesłać przy zgłoszeniu |
 | [`docs/pulapki.md`](docs/pulapki.md) | skrót wszystkich pułapek z odnośnikami |
 
 Jeśli zamierzasz dodać obsługę kolejnego modelu — zacznij od

@@ -4,17 +4,21 @@ Widok LuCI pokazujący na żywo parametry modemu ZTE stanowiącego łącze WAN r
 Backend dostarcza pakiet [`zte-modem-core`](../zte-modem-core/) — ten pakiet to **sam
 interfejs**.
 
-> **Zakres jest zamknięty.** Cztery zakładki, tylko odczyt, **zero zapisu do pamięci
-> trwałej**. Statystyki, historia sygnału i wykresy należą do
+> **Zakres jest zamknięty.** Trzy zakładki, tylko odczyt, **zero zapisu do pamięci
+> trwałej**. Liczniki transferu, statystyki, historia sygnału i wykresy należą do
 > [`luci-app-zte-modem`](../luci-app-zte-modem/) — tutaj świadomie ich nie ma, żeby nie
 > wciągać modułu w zapis do flasha.
 
 | zakładka | zawartość |
 |---|---|
-| **Status** | RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, identyfikacja stacji bazowej |
-| **Transfer** | licznik miesięczny i bieżącego połączenia z podziałem pobrane/wysłane, prędkość chwilowa skalowana sufitem teoretycznym |
+| **Status** | RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, komórki sąsiednie, identyfikacja stacji bazowej |
 | **Modem** | model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
 | **Konfiguracja** | adres modemu, hasło, interwał, test logowania |
+
+> Zakładka **Transfer** (licznik miesięczny i sesji, prędkość chwilowa skalowana sufitem
+> teoretycznym) została stąd usunięta — trafi do wersji pełnej. Kod jest w historii gita,
+> w commicie `fbde1c1`; backend nadal pobiera `monthly_*` i `realtime_*`, bo
+> [`zte-modem-core`](../zte-modem-core/) jest wspólny dla obu wersji.
 
 Instalacja i wymagania — patrz [README repozytorium](../README.md).
 Hasło ustawia się w LuCI: **Services → Modem ZTE → Konfiguracja**.
@@ -34,8 +38,8 @@ apcontroller. Przy `m.tabbed` **każda sekcja mapy staje się osobną zakładką
 bierze się z `sectiontype`, a etykieta z `title` sekcji.
 
 ⚠️ Stąd wymóg: **każda sekcja musi mieć inny `sectiontype`**, inaczej
-`ui.tabs.initTabGroup()` sklei je w jedną zakładkę. Status, Transfer i Modem to własne
-podklasy `form.NamedSection` z nadpisanym `render()`; konfiguracja siedzi w zwykłej sekcji
+`ui.tabs.initTabGroup()` sklei je w jedną zakładkę. Status i Modem to własne podklasy
+`form.NamedSection` z nadpisanym `render()`; konfiguracja siedzi w zwykłej sekcji
 (sectiontype `zte-modem`).
 
 ## Prezentacja sygnału

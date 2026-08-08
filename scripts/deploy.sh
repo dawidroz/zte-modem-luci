@@ -48,13 +48,8 @@ run() {
 }
 
 # Tryb wynika ze sciezki: backend rpcd musi byc wykonywalny, config trzyma haslo.
-mode_for() {
-	case "$1" in
-		/usr/libexec/rpcd/*) echo 0755 ;;
-		/etc/config/*)       echo 0600 ;;
-		*)                   echo 0644 ;;
-	esac
-}
+# Regula jest wspolna z build-pkg.sh - patrz lib.sh.
+. "$ROOT/scripts/lib.sh"
 
 put() { # $1 = plik zrodlowy, $2 = sciezka docelowa, $3 = tryb
 	if [ "$DRY" -eq 1 ]; then return 0; fi
@@ -100,6 +95,9 @@ done
 
 echo
 echo "Przeladowanie:"
+# Czysci cache SERWEROWY. Widok w JS siedzi dodatkowo w cache PRZEGLADARKI -
+# LuCI podaje go ze statycznym parametrem wersji, wiec podmiana pliku na
+# routerze go nie uniewaznia. Stad przypomnienie na koncu.
 run "rm -rf /tmp/luci-modulecache /tmp/luci-indexcache*"
 run "/etc/init.d/rpcd restart"
 
@@ -115,3 +113,7 @@ if [ "$DRY" -eq 0 ]; then
 fi
 
 echo "Gotowe."
+echo
+echo "  ! W przegladarce zrob TWARDE przeladowanie (Ctrl+Shift+R)."
+echo "    Bez tego LuCI pokaze stara wersje widoku z cache i bedzie to"
+echo "    wygladac na nieudane wdrozenie."

@@ -29,6 +29,7 @@ i czyta się bez logowania.
 | pole | MC888 | MC7010 | MF297D | MF79U |
 |---|---|---|---|---|
 | `lte_rsrp` | ✓ | ✓ | ✓ | ✓ |
+| RSRP/RSRQ **per nośna dodatkowa** | **brak** | **brak** | — | — |
 | `lte_rsrq` | ✓ | ✓ | **puste** | ✓ |
 | `lte_snr` / `lte_rssi` | ✓ | ✓ | **puste** (patrz niżej) | ✓ |
 | `lte_pci` | ✓ | ✓ | **puste** | ✓ |
@@ -36,6 +37,13 @@ i czyta się bez logowania.
 | `Z5g_rsrq` | ✓ (`-11`) | **zawsze puste** | brak 5G | brak 5G |
 | `bandwidth` | ✓ (`"15MHz"`) | **zawsze puste** | — | — |
 | pola CA (`lte_ca_*`) | ✓ | ✓ | częściowo | **brak** |
+
+**Poziomu sygnału per nośna dodatkowa API nie podaje w ogóle.** Odpytane i puste na MC888
+i MC7010: `lte_multi_ca_scell_sig_info`, `lte_ca_scell_rsrp`, `lte_ca_scell_rsrq`,
+`lte_scell_rsrp`, `scell_rsrp`, `lte_multi_ca_scell_signal_info`. Samo
+`lte_multi_ca_scell_info` ma sześć pól i **żadne nie jest poziomem**. Stąd tabela nośnych
+nie ma kolumn RSRP/RSRQ — byłyby wypełnione wyłącznie w wierszu PCell, powtarzając kafelki
+stojące bezpośrednio nad tabelą.
 
 MC7010 **nie raportuje RSRQ dla 5G NR** — i nie chodzi o inną nazwę pola: `nr5g_rsrq`,
 `Z5g_RSRQ` i `nr_rsrq` też są puste. W teście obciążeniowym `Z5g_rsrp` i `Z5g_SINR` były
@@ -56,6 +64,10 @@ poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 
 ## Liczniki transferu
 
+> ℹ️ Pola są **pobierane przez core**, ale wersja light ich nie pokazuje — zakładka
+> Transfer należy do [wersji pełnej](../luci-app-zte-modem/README.md). Ustalenia poniżej
+> dotyczą samych pól i zostają w mocy dla obu wersji.
+
 | pole | znaczenie |
 |---|---|
 | `monthly_rx_bytes` / `monthly_tx_bytes` | licznik miesięczny, zeruje się wg **cyklu rozliczeniowego modemu** |
@@ -67,11 +79,11 @@ poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 interfejsie WAN i nie da się ich wyzerować z poziomu modułu (zakres tylko do odczytu).
 
 ✅ `realtime_*_bytes` potwierdzone na **MC888** (2026-08-07). Na pozostałych modelach
-jeszcze niesprawdzone — widok pomija sekcję „Bieżące połączenie", gdy obie wartości są
-puste, więc firmware bez tych liczników degraduje się cicho. Przy okazji profilowania
-kolejnego modemu warto uzupełnić tę tabelę.
+jeszcze niesprawdzone — widok pomijał sekcję „Bieżące połączenie", gdy obie wartości są
+puste, więc firmware bez tych liczników degradował się cicho. Zasadę zachować przy
+odtwarzaniu zakładki. Przy okazji profilowania kolejnego modemu warto uzupełnić tę tabelę.
 
-⚠️ `realtime_*_thrpt` podaje **bajty/s**, a nie bity — widok mnoży przez 8, żeby pokazać
+⚠️ `realtime_*_thrpt` podaje **bajty/s**, a nie bity — trzeba mnożyć przez 8, żeby pokazać
 Mb/s porównywalne z sufitem teoretycznym. Zweryfikowane na MC888 (2026-08-07).
 
 ⚠️⚠️ **`realtime_*_thrpt` jest chwilowe w oknie rzędu sekundy** i praktycznie
@@ -142,6 +154,29 @@ pierwsza nośna dodatkowa raportowana przez modem.
 ⚠️ **Niespójność do zapamiętania:** `lte_pci` (nośna główna) jest **szesnastkowe**,
 ale PCI wewnątrz `lte_multi_ca_scell_info` jest **dziesiętne**.
 
+⚠️⚠️ **MC888 melduje nośną główną DRUGI RAZ jako SCell.** Potwierdzone w trzech próbkach
+co 5 s (2026-08-08):
+
+```
+lte_pci = 1a3 (419)   lte_ca_pcell_freq = 3125   lte_ca_pcell_band = 7
+lte_multi_ca_scell_info = "1,198,2,8,3650,5.0;2,271,1,3,1815,15.0;3,419,1,7,3125,15.0"
+                                                                   └ PCI 419 @ 3125 = PCell
+```
+
+Ten sam PCI **i** ten sam EARFCN co nośna główna — to ta sama komórka, a nośna nie może być
+agregowana sama ze sobą. Bez odsiania widok pokazywał ją dwa razy i liczył:
+
+| | z duplikatem | po odsianiu |
+|---|---|---|
+| nośne | 4×CA | **3×CA** |
+| łączna szerokość | 50 MHz | **35 MHz** |
+| sufit teoretyczny | 378 Mb/s | **265 Mb/s** |
+
+Błąd nie kończył się na tabeli: `ceilingOf()` skaluje sufitem paski prędkości na zakładce
+**Transfer**, więc zawyżenie o 43% szło dalej. Widok odrzuca wpis SCell o PCI i EARFCN
+równych PCell-owi. MC7010 duplikatu nie ma (nośne 425/1290/3200 przy PCell 6275) i po
+poprawce raportuje bez zmian 4×CA / 70 MHz.
+
 ⚠️ **`lte_ca_scell_band` = `"0"` przy wyłączonej agregacji.** MF297D zwraca wtedy
 `lte_ca_scell_band: "0"` i `lte_ca_scell_bandwidth: "0.0"` — jako łańcuchy są
 **prawdziwe**, więc zwykłe `if (st.lte_ca_scell_band)` dorzuca do tabeli widmową nośną
@@ -162,6 +197,62 @@ i potrafią być puste, gdy jej nie ma. Dlatego widok schodzi po zapasach:
 Jeśli modem nie poda szerokości żadnym kanałem, tabela nośnych i tak się renderuje
 (kolumna „Szerokość" = `–`), a zamiast sufitu teoretycznego pojawia się nota, że nie da
 się go policzyć. Wcześniej znikała cała sekcja, co wyglądało na usterkę modułu.
+
+## Komórki sąsiednie (`ngbr_cell_info`)
+
+Jedyne pole, które pokazuje **jednocześnie sygnał użyteczny i konkurencję na tej samej
+częstotliwości** — właściwy instrument przy ustawianiu anteny kierunkowej.
+
+```
+ngbr_cell_info = "3125,419,-11,-100,-66;3125,418,-18,-107,-80;3125,136,-15,-105,-81"
+                  │    │   │   │    └ RSSI [dBm]
+                  │    │   │   └────── RSRP [dBm]
+                  │    │   └────────── RSRQ [dB]
+                  │    └────────────── PCI (dziesiętnie!)
+                  └─────────────────── EARFCN
+```
+
+Separator `;`, pola `,` — ta sama konwencja co `lte_multi_ca_scell_info`, i tak samo
+**PCI jest dziesiętne**, mimo że `lte_pci` bywa szesnastkowe.
+
+Układ odczytany z danych, nie z dokumentacji — potwierdzony na dwóch modelach (2026-08-08):
+
+| model | próbka | `lte_pci` | `lte_ca_pcell_freq` |
+|---|---|---|---|
+| MC888 | 5 wpisów, PCI 419/418/417/133/136 | `1a3` = **419** | 3125 |
+| MC7010 | 3 wpisy, PCI 123/451/168 | `7b` = **123** | 6275 |
+| MF297D, MF79U | niesprawdzone | | |
+
+Na obu **pierwszy wpis to komórka obsługująca** — zgadza się z `lte_pci` i
+`lte_ca_pcell_freq`. Widok mimo to rozpoznaje ją **po wartościach, nie po pozycji**:
+dopasowanie po PCI i EARFCN nie wywróci się na firmwarze, który posortuje listę inaczej.
+
+### ⚠️⚠️ Zakłócenia policzone z tego pola NIE odtwarzają `lte_snr`
+
+Kuszący rachunek — zsumować moc sąsiadów co-channel i odjąć od RSRP komórki obsługującej —
+na jednej próbce MC7010 zgodził się ze zmierzonym SINR-em **co do dziesiątej decybela**.
+To był zbieg okoliczności:
+
+| modem | `S − I` z `ngbr_cell_info` | zmierzony `lte_snr` | rozjazd |
+|---|---|---|---|
+| MC7010 | 3,0 dB | 4,4 dB | 1,4 dB |
+| MC888 | 0,9 dB | **13,4 dB** | **12,5 dB** |
+
+Powód widać w danych MC888: PCI **417/418/419** to kolejne numery, czyli **sektory tego
+samego masztu**. Trafiają na listę sąsiadów, ale nie zakłócają jak obcy nadajnik — antena
+sektorowa je tłumi. Odrzucenie ich z sumy też nie ratuje rachunku (wychodzi 3,8 dB
+przy 13,4 dB).
+
+Dlatego widok **nie liczy żadnego SINR-u ani sumy zakłóceń**. Pokazuje odstęp `Δ` każdego
+sąsiada od komórki obsługującej — wielkość, którą realnie maksymalizuje się obracając
+antenę, i która nic nie obiecuje ponad to, co jest w danych. Sąsiedzi na innym EARFCN-ie
+są wyliczeni, ale nie liczą się jako co-channel.
+
+Dominujący zakłócacz jest wyróżniony w tabeli **warunkowo** — tylko gdy siedzi nie dalej
+niż 10 dB pod komórką obsługującą. Bezwarunkowe podświetlanie „najsilniejszego" zawsze coś
+oznacza, także gdy jedyny sąsiad jest 25 dB niżej i nie ma znaczenia. **10 dB to próg
+czytelności, nie wyliczenie z fizyki** — skoro odstępy z tego pola nie odtwarzają `lte_snr`,
+żaden próg wyprowadzony stąd „fizycznie" nie byłby uczciwy.
 
 ## Procedura profilowania kolejnego modelu
 

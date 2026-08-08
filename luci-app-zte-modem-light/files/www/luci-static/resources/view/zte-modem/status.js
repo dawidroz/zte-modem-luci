@@ -69,14 +69,6 @@ function txt(v) {
 	return (v === undefined || v === null || v === '') ? '–' : String(v);
 }
 
-function bytes(v) {
-	var n = num(v);
-	if (n === null) return '–';
-	var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0;
-	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-	return n.toFixed(i ? 2 : 0) + ' ' + u[i];
-}
-
 function quality(kind, v) {
 	var t = TIERS[kind], n = num(v);
 	if (!t || n === null) return null;
@@ -330,19 +322,18 @@ function bwOf(st) {
 	return m ? num(m[1]) : null;
 }
 
-/* Rozbior nosnych na wiersze. Wydzielone z `carriers()`, bo sufit teoretyczny
-   liczy z tego takze zakladka Transfer - skalujemy nim paski predkosci. */
+/* PCI nosnej glownej sprowadzone do LICZBY dziesietnej, wg kodowania wykrytego
+   przez backend. Osobno, bo posluguje sie tym takze tabela sasiadow - PCI
+   wewnatrz lte_multi_ca_scell_info i ngbr_cell_info jest DZIESIETNE niezaleznie
+   od tego, w czym modem podaje `lte_pci`. */
+function pcellPciDec(st) {
+	if (!st.lte_pci) return null;
+	var d = parseInt(String(st.lte_pci), pciHex(st) ? 16 : 10);
+	return isNaN(d) ? null : d;
+}
+
 function carrierRows(st) {
 	var rows = [];
-
-	/* PCI nosnej glownej - w tym samym kodowaniu co reszta identyfikatorow.
-	   (PCI wewnatrz lte_multi_ca_scell_info jest DZIESIETNE niezaleznie od tego.) */
-	function pcellPci(v) {
-		if (!v) return '–';
-		if (!pciHex(st)) return String(v);
-		var d = parseInt(String(v), 16);
-		return isNaN(d) ? String(v) : String(d);
-	}
 
 	var pband = bandOf(st), pbw = bwOf(st);
 	if (pband || pbw !== null)
@@ -351,13 +342,34 @@ function carrierRows(st) {
 			band:   pband ? 'B' + pband : '–',
 			bw:     pbw,
 			earfcn: txt(earfcnOf(st)),
-			pci:    pcellPci(st.lte_pci)
+			pci:    (pcellPciDec(st) !== null) ? String(pcellPciDec(st)) : txt(st.lte_pci)
 		});
 
 	if (st.lte_multi_ca_scell_info) {
+		/* MC888 potrafi zameldowac NOSNA GLOWNA DRUGI RAZ jako SCell - potwierdzone
+		 * w trzech probkach co 5 s (2026-08-08):
+		 *
+		 *   lte_pci = 1a3 (419), lte_ca_pcell_freq = 3125, lte_ca_pcell_band = 7
+		 *   lte_multi_ca_scell_info = "...;3,419,1,7,3125,15.0"
+		 *                                 ^^^^^^^^^^^^^^ ta sama komorka
+		 *
+		 * Bez odsiania widok pokazywal te sama nosna dwa razy, meldowal 4xCA zamiast
+		 * 3xCA i doliczal 15 MHz, ktorych nie ma - wraz z zawyzonym o 43% sufitem
+		 * teoretycznym (378 zamiast 265 Mb/s).
+		 *
+		 * Ten sam PCI i ten sam EARFCN co PCell = ta sama komorka; nosna nie moze
+		 * byc agregowana sama ze soba, wiec odrzucenie jest bezpieczne.
+		 */
+		var pPci = pcellPciDec(st), pEarfcn = num(earfcnOf(st));
+
 		String(st.lte_multi_ca_scell_info).split(';').forEach(function(part) {
 			var f = part.split(',');
 			if (f.length < 6) return;
+
+			if (pPci !== null && pEarfcn !== null &&
+			    num(f[1]) === pPci && num(f[4]) === pEarfcn)
+				return;
+
 			rows.push({ name: 'SCC' + f[0], band: 'B' + f[3], bw: num(f[5]),
 			            earfcn: f[4], pci: f[1] });
 		});
@@ -370,13 +382,6 @@ function carrierRows(st) {
 	}
 
 	return rows;
-}
-
-/* Sufit warstwy fizycznej dla calego lacza, albo null gdy modem nie podaje
-   szerokosci zadnej nosnej (MC7010 zwraca puste `bandwidth`). */
-function ceilingOf(st) {
-	var rb = carrierRows(st).reduce(function(a, r) { return a + rbFor(r.bw); }, 0);
-	return rb > 0 ? ceiling(rb) : null;
 }
 
 function carriers(st) {
@@ -432,6 +437,157 @@ function carriers(st) {
 		E('table', { 'class': 'table', 'style': 'margin-top:.5em' }, [head].concat(body)),
 		E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' }, summary),
 		ceilingNode
+	]);
+}
+
+/* Komorki sasiednie - `ngbr_cell_info`.
+ *
+ *   "3125,419,-11,-100,-66;3125,418,-18,-107,-80;3125,136,-15,-105,-81"
+ *     │    │   │   │    └ RSSI [dBm]
+ *     │    │   │   └────── RSRP [dBm]
+ *     │    │   └────────── RSRQ [dB]
+ *     │    └────────────── PCI (DZIESIETNIE, jak w lte_multi_ca_scell_info)
+ *     └─────────────────── EARFCN
+ *
+ * Uklad odczytany z danych dwoch modemow, nie z dokumentacji: na MC888 pierwszy
+ * wpis ma PCI 419 i EARFCN 3125, co zgadza sie z `lte_pci` (0x1a3) i
+ * `lte_ca_pcell_freq`; na MC7010 tak samo dla PCI 123 (0x7b) i EARFCN 6275.
+ *
+ * Komorke obslugujaca rozpoznajemy PO WARTOSCIACH, nie po pozycji. Pierwszy wpis
+ * pasuje na obu sprawdzonych modemach, ale dopasowanie po PCI i EARFCN nie
+ * wywroci sie na firmwarze, ktory posortuje liste inaczej.
+ */
+function neighbourRows(st) {
+	if (!st.ngbr_cell_info) return [];
+
+	var servPci    = pcellPciDec(st);
+	var servEarfcn = num(earfcnOf(st));
+
+	return String(st.ngbr_cell_info).split(';').map(function(part) {
+		var f = part.split(',');
+		if (f.length < 5) return null;
+
+		var earfcn = num(f[0]), pci = num(f[1]), rsrp = num(f[3]);
+		if (earfcn === null || pci === null || rsrp === null) return null;
+
+		return {
+			earfcn:  earfcn,
+			pci:     pci,
+			rsrq:    num(f[2]),
+			rsrp:    rsrp,
+			rssi:    num(f[4]),
+			serving: (servPci !== null && pci === servPci &&
+			          servEarfcn !== null && earfcn === servEarfcn),
+			cochan:  (servEarfcn !== null && earfcn === servEarfcn)
+		};
+	}).filter(function(r) { return r !== null; });
+}
+
+/* Tabela sasiadow. Swiadomie NIE liczymy tu sumy zaklocen ani SINR-u z RSRP
+ * sasiadow: rachunek S-I rozjezdza sie ze zmierzonym `lte_snr` o 12,5 dB na
+ * MC888 (0,9 dB wyliczone przy 13,4 dB zmierzonych). Widac dlaczego - PCI
+ * 417/418/419 to kolejne numery, czyli sektory TEGO SAMEGO masztu; trafiaja na
+ * liste sasiadow, ale nie zaklocaja jak obcy nadajnik. Odrzucenie ich z sumy
+ * tez nie ratuje rachunku (3,8 dB przy 13,4 dB).
+ *
+ * Zostaje odstep `Δ` od komorki obslugujacej - wielkosc, ktora realnie
+ * maksymalizuje sie obracajac antene, i ktora nic nie obiecuje ponad dane.
+ *
+ * RSSI jest rozbierane, ale nie pokazywane - przy strojeniu liczy sie RSRP
+ * i odstep, a szesc kolumn miesci sie bez zawijania.
+ */
+function neighbours(st) {
+	var rows = neighbourRows(st);
+	if (!rows.length) return null;
+
+	var serv = rows.filter(function(r) { return r.serving; })[0] || null;
+	var cochan = rows.filter(function(r) { return r.cochan && !r.serving; });
+
+	/* Najsilniejszy zaklocacz co-channel = najmniejszy odstep, czyli najwyzsze RSRP. */
+	var worst = cochan.length
+		? cochan.reduce(function(a, r) { return r.rsrp > a.rsrp ? r : a; })
+		: null;
+
+	/* Wyrozniamy go WARUNKOWO - tylko gdy jest nie dalej niz 10 dB pod komorka
+	 * obslugujaca. Bezwarunkowe podswietlanie "najsilniejszego" zawsze cos
+	 * oznacza, takze gdy jedyny sasiad siedzi 25 dB nizej i jest bez znaczenia;
+	 * kolor niosl by wtedy falszywy alarm.
+	 *
+	 * 10 dB to prog czytelnosci ("na tyle blisko, ze konkuruje"), a NIE wyliczenie
+	 * z fizyki - patrz komentarz wyzej: odstepy z tego pola nie odtwarzaja
+	 * `lte_snr`, wiec zaden prog stad wyprowadzony nie bylby uczciwy.
+	 *
+	 * Przy obracaniu anteny wyroznienie bedzie przeskakiwac miedzy wierszami,
+	 * bo dominujacy zaklocacz sie zmienia. To jest cel, nie usterka.
+	 */
+	var dominant = (serv && worst && (serv.rsrp - worst.rsrp) <= 10) ? worst : null;
+
+	/* Kolejnosc kolumn wspolnych z tabela nosnych (Pasmo -> EARFCN -> PCI) jest
+	   CELOWO taka sama - obie tabele stoja na tej samej zakladce jedna pod druga
+	   i przy strojeniu anteny wodzi sie po nich wzrokiem naprzemiennie. Metryki
+	   sasiada dopisane na koncu, bo w tabeli nosnych nie maja odpowiednika. */
+	var head = E('tr', { 'class': 'tr table-titles' },
+		[_('Pasmo'), 'EARFCN', 'PCI', 'RSRP', 'RSRQ', 'Δ'].map(function(h) {
+			return E('th', { 'class': 'th left' }, h);
+		}));
+
+	var body = rows.map(function(r) {
+		var band  = bandFromEarfcn(r.earfcn);
+		var delta = serv ? (r.rsrp - serv.rsrp) : null;
+
+		/* Znacznik slowny obok koloru - na samym kolorze nie wolno opierac
+		   jedynego sygnalu (daltonizm, wydruk, ciemny motyw). */
+		var tag = r.serving  ? '  ·  ' + _('obsługująca')
+		        : (r === dominant ? '  ·  ' + _('dominujący') : '');
+
+		var cells = [
+			band ? 'B' + band : '–',
+			String(r.earfcn),
+			r.pci + tag,
+			r.rsrp + ' dBm',
+			r.rsrq !== null ? r.rsrq + ' dB' : '–',
+			r.serving ? '—' : (delta !== null ? delta.toFixed(0) + ' dB' : '–')
+		];
+
+		return E('tr', { 'class': 'tr' }, cells.map(function(c, i) {
+			var style = r.serving ? 'font-weight:600' : '';
+
+			/* Kolorujemy sam odstep, nie caly wiersz: pogrubienie jest juz zajete
+			   przez komorke obslugujaca, a zaklocacz ma rywalizowac o uwage
+			   z nia, nie ja przekrzykiwac. */
+			if (r === dominant && (i === 2 || i === 5))
+				style = 'font-weight:600;color:' + COLORS.poor;
+
+			return E('td', { 'class': 'td left', 'style': style }, c);
+		}));
+	});
+
+	var note;
+	if (dominant) {
+		note = _('Najsilniejszy zakłócacz co-channel') + ': PCI ' + dominant.pci + ', ' +
+		       Math.abs(dominant.rsrp - serv.rsrp).toFixed(0) + ' dB ' + _('poniżej') +
+		       ' — ' + _('to jego odstęp maksymalizujesz obracając antenę') + '.';
+	} else if (serv && worst) {
+		note = _('Najbliższy sąsiad co-channel (PCI %s) jest %s dB niżej — z zapasem.')
+			.format(worst.pci, Math.abs(worst.rsrp - serv.rsrp).toFixed(0));
+	} else if (!serv) {
+		note = _('Komórki obsługującej nie ma na liście — odstępów nie da się policzyć.');
+	} else {
+		note = _('Żaden sąsiad nie nadaje na częstotliwości nośnej głównej.');
+	}
+
+	return E('div', { 'style': 'margin-top:1.2em' }, [
+		E('h4', { 'style': 'margin:.3em 0 .3em' }, [
+			_('Komórki sąsiednie'),
+			E('span', { 'style': 'font-weight:400;font-size:.8em;opacity:.7;margin-left:.6em' },
+				_('co-channel') + ': ' + cochan.length)
+		]),
+		E('table', { 'class': 'table', 'style': 'margin-top:.5em' }, [head].concat(body)),
+		E('div', { 'style': 'font-size:.85em;opacity:.7;margin-top:.3em' }, note),
+		E('div', { 'style': 'font-size:.8em;opacity:.55;margin-top:.2em' },
+			_('Δ to odstęp RSRP od komórki obsługującej. Przy strojeniu anteny maksymalizuje ' +
+			  'się ten odstęp, a nie samo RSRP — ale nie jest to SINR: sektory tego samego ' +
+			  'masztu też trafiają na tę listę.'))
 	]);
 }
 
@@ -526,6 +682,9 @@ function renderStatus(st) {
 			[_('Cell ID'),            cellId(st.cell_id, chex)],
 			enodeb(st.cell_id, chex) ? [_('eNodeB ID'), enodeb(st.cell_id, chex)] : null
 		]));
+
+		var nb = neighbours(st);
+		if (nb) out.push(nb);
 	}
 
 	/* 5G */
@@ -559,20 +718,6 @@ function renderStatus(st) {
 	return out;
 }
 
-/* Kierunek transferu to nie jakosc, wiec swiadomie NIE uzywamy tu palety
-   good/ok/poor - zielony przy transferze czytalby sie jako ocena. */
-var DIR = { rx: '#3f8ed0', tx: '#7e57c2' };
-
-var ARROW = { rx: '↓', tx: '↑' };
-
-/* Predkosc w Mb/s (bity), a nie MiB/s - w tej jednostce podany jest sufit
-   teoretyczny i w niej podaje sie przepustowosc lacza, wiec paski i liczby
-   daja sie ze soba porownac. Modem raportuje bajty na sekunde. */
-function mbps(v) {
-	var n = num(v);
-	return (n === null) ? null : n * 8 / 1e6;
-}
-
 function footer(st) {
 	var when = st._timestamp ? new Date(st._timestamp * 1000).toLocaleTimeString() : '–';
 	/* Jedna aplikacja obsluguje rozne modele - warto widziec, ktory to. */
@@ -580,144 +725,6 @@ function footer(st) {
 		(st.model_name ? st.model_name + ' · ' : '') + txt(st._host) +
 		' · ' + _('firmware') + ': ' + txt(st.wa_inner_version) +
 		' · ' + _('odczyt') + ': ' + when);
-}
-
-/* Naglowek sekcji z opcjonalna adnotacja dosunieta do prawej (np. czas trwania
-   polaczenia). Zwykly <h4> jak w reszcie strony, zeby zakladki sie nie rozjechaly. */
-function sectionHead(title, note) {
-	return E('div', {
-		'style': 'display:flex;align-items:baseline;justify-content:space-between;' +
-		         'gap:1em;margin:1.4em 0 .5em'
-	}, [
-		E('h4', { 'style': 'margin:0' }, title),
-		note ? E('div', { 'style': 'font-size:.85em;opacity:.65' }, note) : ''
-	]);
-}
-
-/* Karta licznika: suma na pierwszym planie, pod nia pasek podzialu rx/tx,
-   pod paskiem rozbicie na kierunki.
- *
- * Zwraca null, gdy modem nie wypelnia tej pary pol - tak samo jak `metric()`
- * przy metrykach sygnalu. Pusta karta "–/–" sugerowalaby awarie lacza, a to
- * zwykle po prostu firmware, ktory takich licznikow nie ma (realtime_*_bytes). */
-function counterCard(rxRaw, txRaw) {
-	var rx = num(rxRaw), tx = num(txRaw);
-	if (rx === null && tx === null) return null;
-
-	var total = (rx || 0) + (tx || 0);
-	var rxPct = total > 0 ? (rx || 0) / total * 100 : 0;
-
-	var seg = function(kind, pct) {
-		return E('div', {
-			'style': 'width:' + pct.toFixed(1) + '%;background:' + DIR[kind] +
-			         ';height:100%'
-		});
-	};
-
-	var leg = function(kind, raw, label) {
-		return E('div', { 'style': 'display:flex;align-items:center;gap:.4em' }, [
-			E('span', { 'style': 'color:' + DIR[kind] + ';font-weight:700' }, ARROW[kind]),
-			E('span', { 'style': 'font-weight:600' }, bytes(raw)),
-			E('span', { 'style': 'opacity:.6' }, label)
-		]);
-	};
-
-	return E('div', {
-		'style': 'padding:14px 16px;border:1px solid var(--border-color-low,#ccc);' +
-		         'border-radius:8px;background:var(--background-color-medium,transparent)'
-	}, [
-		E('div', {
-			'style': 'display:flex;align-items:baseline;justify-content:space-between;gap:1em'
-		}, [
-			E('div', { 'style': 'font-size:.85em;opacity:.75' }, _('Razem')),
-			E('div', { 'style': 'font-size:1.6em;font-weight:600;line-height:1.1' },
-				bytes(total))
-		]),
-
-		/* Wlasny pasek zamiast .cbi-progressbar: ten renderuje JEDNO wypelnienie,
-		   a tu potrzebne sa dwa segmenty stykajace sie ze soba. */
-		E('div', {
-			'style': 'display:flex;height:10px;border-radius:5px;overflow:hidden;' +
-			         'margin:.7em 0 .5em;background:var(--border-color-low,#e0e0e0)',
-			'title': total > 0 ? _('pobrane') + ' ' + Math.round(rxPct) + '%' : ''
-		}, total > 0 ? [ seg('rx', rxPct), seg('tx', 100 - rxPct) ] : []),
-
-		E('div', {
-			'style': 'display:flex;flex-wrap:wrap;gap:.4em 1.5em;font-size:.9em'
-		}, [
-			leg('rx', rx, _('pobrane')),
-			leg('tx', tx, _('wysłane'))
-		])
-	]);
-}
-
-/* Kafelek predkosci. Pasek pokazuje udzial w sufcie teoretycznym - bez sufitu
-   (modele bez `bandwidth`) zostaje sama liczba, zamiast paska bez skali. */
-function speedTile(kind, label, raw, ceil) {
-	var v = mbps(raw);
-
-	var body = [
-		E('div', { 'style': 'font-size:.85em;opacity:.75' },
-			ARROW[kind] + ' ' + label),
-		E('div', { 'style': 'font-size:1.5em;font-weight:600;margin:.1em 0 .2em' },
-			v === null ? '–' : v.toFixed(1) + ' Mb/s')
-	];
-
-	if (v !== null && ceil) {
-		var pct = Math.max(0, Math.min(100, v / ceil * 100));
-		body.push(E('div', {
-			'style': 'height:8px;border-radius:4px;overflow:hidden;margin:.2em 0 .35em;' +
-			         'background:var(--border-color-low,#e0e0e0)'
-		}, E('div', {
-			'style': 'width:' + pct.toFixed(1) + '%;height:100%;background:' + DIR[kind]
-		})));
-		body.push(E('div', { 'style': 'font-size:.8em;opacity:.6' },
-			Math.round(pct) + '% ' + _('z sufitu') + ' ' + Math.round(ceil) + ' Mb/s'));
-	}
-
-	return E('div', {
-		'style': 'flex:1 1 190px;min-width:190px;padding:12px 14px;' +
-		         'border:1px solid var(--border-color-low,#ccc);border-radius:8px'
-	}, body);
-}
-
-function renderTransfer(st) {
-	st = st || {};
-	var out = [];
-
-	var monthly = counterCard(st.monthly_rx_bytes, st.monthly_tx_bytes);
-	var session = counterCard(st.realtime_rx_bytes, st.realtime_tx_bytes);
-
-	if (!monthly && !session)
-		out.push(banner(_('Modem nie zwrócił żadnych liczników transferu.'), COLORS.ok));
-
-	if (monthly) {
-		out.push(sectionHead(_('Licznik miesięczny')));
-		out.push(monthly);
-	}
-
-	/* Liczniki biezacej sesji ma tylko czesc firmware'ow - gdy ich nie ma,
-	   sekcja po prostu nie powstaje (ta sama zasada co przy metrykach sygnalu). */
-	if (session) {
-		out.push(sectionHead(_('Bieżące połączenie'), duration(st.realtime_time)));
-		out.push(session);
-	}
-
-	var ceil = ceilingOf(st);
-	out.push(sectionHead(_('Prędkość chwilowa')));
-	out.push(E('div', { 'style': 'display:flex;flex-wrap:wrap;gap:8px' }, [
-		speedTile('rx', _('Pobieranie'), st.realtime_rx_thrpt, ceil),
-		speedTile('tx', _('Wysyłanie'),  st.realtime_tx_thrpt, ceil)
-	]));
-
-	out.push(E('div', {
-		'style': 'margin-top:1.2em;font-size:.85em;opacity:.7'
-	}, _('Liczniki pochodzą z modemu i zerują się zgodnie z jego własnym cyklem rozliczeniowym — ' +
-	     'nie z ruchem mierzonym na routerze.')));
-
-	out.push(footer(st));
-
-	return out;
 }
 
 /* --- zakladka "Modem": tozsamosc urzadzenia, karty i polaczenia ------------ */
@@ -858,7 +865,6 @@ return view.extend({
 		/* Kazda zakladka ma wlasny panel; poller podmienia oba naraz z jednego odczytu. */
 		var panels = {
 			status:   E('div', {}, renderStatus(st)),
-			transfer: E('div', {}, renderTransfer(st)),
 			device:   E('div', {}, renderDevice(st))
 		};
 
@@ -876,7 +882,6 @@ return view.extend({
 			return callStatus().then(function(res) {
 				res = res || {};
 				swap('status',   renderStatus(res));
-				swap('transfer', renderTransfer(res));
 				swap('device',   renderDevice(res));
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
@@ -907,13 +912,10 @@ return view.extend({
 		/* --- zakladka 1: Status ------------------------------------------- */
 		m.section(panelTab('status', _('Status')), 'main', 'status');
 
-		/* --- zakladka 2: Transfer ----------------------------------------- */
-		m.section(panelTab('transfer', _('Transfer')), 'main', 'transfer');
-
-		/* --- zakladka 3: Modem ------------------------------------------- */
+		/* --- zakladka 2: Modem ------------------------------------------- */
 		m.section(panelTab('device', _('Modem')), 'main', 'device');
 
-		/* --- zakladka 4: Konfiguracja ------------------------------------- */
+		/* --- zakladka 3: Konfiguracja ------------------------------------- */
 		var s = m.section(form.NamedSection, 'main', 'zte-modem', _('Konfiguracja'));
 
 		/* Tytul sekcji jest juz etykieta zakladki - nie powtarzaj go w <h3>. */

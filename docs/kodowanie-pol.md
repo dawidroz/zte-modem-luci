@@ -42,6 +42,10 @@ interpretację, a po zestawieniu połączenia pole wraca do pełnej postaci.
 
 ## `lte_pci` — `_pci_base`, decyzja OSOBNA
 
+Dotyczy **wyłącznie pola `lte_pci`**. PCI wewnątrz `lte_multi_ca_scell_info`
+i `ngbr_cell_info` jest **zawsze dziesiętne**, niezależnie od tego, w czym modem podaje
+`lte_pci` — te listy nie przechodzą przez tę heurystykę.
+
 MF79U podaje `cell_id` szesnastkowo, ale PCI dziesiętnie: `205`, co jako hex daje 517 —
 poza zakresem PCI (0–503). Stąd druga, **niezależna** heurystyka:
 

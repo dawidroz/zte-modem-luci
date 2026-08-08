@@ -1,2 +1,5 @@
 # lokalna konfiguracja narzedzi, nie nalezy do repozytorium
 .claude/
+
+# wynik scripts/build-pkg.sh - artefakty budowania, nie zrodla
+build/

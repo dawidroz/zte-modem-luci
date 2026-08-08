@@ -1,0 +1,21 @@
+# Metadane pakietu - wspolne dla .ipk i .apk (czyta je scripts/build-pkg.sh).
+# Plik jest sourceowany przez basha, wiec bez spacji wokol '='.
+
+PKG_NAME="zte-modem-core"
+PKG_VERSION="1.0.0"
+PKG_RELEASE="1"
+PKG_SECTION="net"
+PKG_LICENSE="GPL-2.0-only"
+PKG_URL="https://github.com/rybirek/zte-modem-luci"
+PKG_DESC="Backend rpcd do monitoringu modemow ZTE przez API goform (tylko odczyt)"
+
+# Ustalone z opkg na docelowym routerze (OpenWrt 24.10.2), nie z pamieci:
+#   jshn.sh    -> jshn        jsonfilter -> jsonfilter
+#   curl       -> curl        ucode      -> ucode
+#   rpcd       -> rpcd        flock, sha256sum, md5sum -> busybox (zawsze jest)
+PKG_DEPENDS="curl ucode jshn jsonfilter rpcd"
+
+PKG_CONFLICTS=""
+
+# Trzyma HASLO do modemu - nie wolno go nadpisac przy aktualizacji.
+PKG_CONFFILES="/etc/config/zte-modem"
