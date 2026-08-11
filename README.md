@@ -55,8 +55,13 @@ z **zredagowanym** IMEI, ICCID, Cell ID i hasłem.
 ./scripts/build-pkg.sh --pkg zte-modem-core  # tylko wybrany
 ```
 
-Pakiety są architektury **`all`** — to sam kod w shellu i JS, nic się nie kompiluje, więc
+Pakiety są **bezarchitekturowe** — to sam kod w shellu i JS, nic się nie kompiluje, więc
 **SDK OpenWrt nie jest potrzebny**. Metadane każdego pakietu leżą w jego pliku `pkginfo`.
+
+⚠️ Każdy format nazywa to inaczej: `.ipk` ma `Architecture: all` (opkg), `.apk` ma
+`arch: noarch` (apk-tools). Wpisanie `all` do `.apk` przechodzi przez `apk mkpkg` bez
+ostrzeżenia, a wywala się dopiero u instalującego jako `error: uninstallable` — patrz
+[`docs/instalacja-i-diagnostyka.md`](docs/instalacja-i-diagnostyka.md#error-uninstallable-przy-apk-add).
 
 | format | dla kogo | czym budowane |
 |---|---|---|

@@ -51,6 +51,8 @@ w odpowiednim dokumencie. Warto przeczytać **przed** dodaniem obsługi kolejneg
 | **Brak `luci-compat` na LuCI 24.10** | `Map`/CBI nie działa; stąd widok w JS | [../luci-app-zte-modem-light/README.md](../luci-app-zte-modem-light/README.md) |
 | **`.ipk` to NIE archiwum `ar`** | `ar t` listuje człony, wszystko wygląda dobrze, a opkg mówi tylko „Malformed package file" | [../scripts/build-pkg.sh](../scripts/build-pkg.sh) |
 | **Do `.apk` wsiąka etykieta SELinuksa z kontenera** | `security.selinux=…container_file_t…` w metadanych pakietu | [../scripts/build-pkg.sh](../scripts/build-pkg.sh) |
+| **`arch: all` w `.apk`** | `apk mkpkg` przyjmuje bez skargi, a przy instalacji `error: uninstallable`; apk-tools mówi na to `noarch` | [instalacja-i-diagnostyka](instalacja-i-diagnostyka.md#error-uninstallable-przy-apk-add) |
+| **Obraz docker OpenWrt nie ma linii `arch` w `/etc/opkg.conf`** | `.ipk all` odbija się od `incompatible with the architectures configured` — na prawdziwym routerze tego nie ma | [../scripts/build-pkg.sh](../scripts/build-pkg.sh) |
 
 ## Metodologiczne
 

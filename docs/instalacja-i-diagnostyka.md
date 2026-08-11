@@ -50,6 +50,28 @@ apk add --allow-untrusted zte-modem-core-*.apk luci-app-zte-modem-light-*.apk
 `zte-modem-core`, a opkg zgłosi wtedy mylący błąd o **niezgodnej architekturze** —
 prawdziwa przyczyna jest w pierwszej linii („cannot find dependency").
 
+#### `error: uninstallable` przy `apk add`
+
+Dotyczy **pakietów `.apk` do wersji 1.0.0 włącznie** — poprawione w 1.1.0 (core)
+i 1.2.0 (widok). Objaw:
+
+```
+ERROR: unable to select packages:
+  zte-modem-core-1.0.0-r1:
+    error: uninstallable
+    arch: all
+```
+
+Nie chodzi ani o zależności, ani o podpis — pakiety miały wpisaną architekturę `all`,
+czyli konwencję **opkg**. `apk-tools` nazywa brak architektury `noarch` i wartości `all`
+nie zna. `apk mkpkg` budował taki pakiet bez słowa skargi, a błąd wychodził dopiero
+u instalującego; linia `arch:` jest w komunikacie tylko jednym z opisów pakietu, więc
+łatwo wziąć całość za brak zależności.
+
+**Rozwiązanie: pobierz pakiety w wersji 1.1.0/1.2.0 lub nowszej.** Sprawdzone na
+OpenWrt 25.12-SNAPSHOT (apk-tools 3.0.5). Architekturę pakietu potwierdza
+`apk adbdump plik.apk | grep arch` — ma być `noarch`.
+
 Potem: **Services → Modem ZTE → Konfiguracja** — adres modemu i hasło administratora.
 
 ⚠️ **Adres modemu to NIE adres routera.** Typowo `192.168.32.1`, `192.168.8.1` albo

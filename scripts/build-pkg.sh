@@ -8,8 +8,9 @@
 #   ./scripts/build-pkg.sh --out /tmp/pkg        # inny katalog wyjsciowy
 #   ./scripts/build-pkg.sh --apk-compat 3.0.0_pre3
 #
-# Pakiety sa architektury `all` - to sam kod w shellu i JS, nic sie nie
-# kompiluje, wiec SDK OpenWrt nie jest potrzebny.
+# Pakiety sa bezarchitekturowe - to sam kod w shellu i JS, nic sie nie
+# kompiluje, wiec SDK OpenWrt nie jest potrzebny. UWAGA: kazdy format nazywa to
+# inaczej - `.ipk` ma "Architecture: all", `.apk` ma "arch: noarch".
 #
 #   .ipk  budowane lokalnie (ar + tar + gzip)      -> OpenWrt <= 24.10, opkg
 #   .apk  budowane przez `apk mkpkg` w kontenerze  -> OpenWrt z apk
@@ -156,7 +157,20 @@ build_apk() { # $1 = katalog stage
 		"name:$PKG_NAME"
 		"version:$ver"
 		"description:$PKG_DESC"
-		"arch:all"
+		# ⚠️ NIE "all" - to konwencja opkg. apk-tools nazywa brak architektury
+		# `noarch` i wartosci "all" nie zna, wiec pakiet przechodzi przez
+		# `apk mkpkg` bez slowa skargi, a przy instalacji leci:
+		#
+		#   ERROR: unable to select packages:
+		#     zte-modem-core-1.0.0-r1:
+		#       error: uninstallable
+		#       arch: all
+		#
+		# Komunikat nie mowi, ze chodzi o architekture - wypisuje ja tylko jako
+		# jedna z linii opisu - wiec latwo wziac to za brak zaleznosci.
+		# Wzorzec z pakietu zbudowanego przez samo OpenWrt:
+		# `apk adbdump luci-app-acl-*.apk` -> `arch: noarch`.
+		"arch:noarch"
 		"license:$PKG_LICENSE"
 		"origin:$PKG_NAME"
 		"maintainer:$PKG_MAINTAINER"
