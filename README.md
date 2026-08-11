@@ -66,8 +66,8 @@ Pakiety są architektury **`all`** — to sam kod w shellu i JS, nic się nie ko
 Instalacja na routerze:
 
 ```sh
-opkg install zte-modem-core_1.0.0-r1_all.ipk luci-app-zte-modem-light_1.1.0-r1_all.ipk
-apk add --allow-untrusted zte-modem-core-1.0.0-r1.apk luci-app-zte-modem-light-1.1.0-r1.apk
+opkg install zte-modem-core_1.1.0-r1_all.ipk luci-app-zte-modem-light_1.2.0-r1_all.ipk
+apk add --allow-untrusted zte-modem-core-1.1.0-r1.apk luci-app-zte-modem-light-1.2.0-r1.apk
 ```
 
 ⚠️ **Podawać oba pakiety naraz** — instalowane osobno, widok nie znajdzie jeszcze

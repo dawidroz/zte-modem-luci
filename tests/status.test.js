@@ -208,5 +208,100 @@ ok('same puste odczyty -> komunikat o braku metryk',
 	/Brak danych o sygnale/.test(H.text(out)));
 ok('blad modemu widoczny na zakladce', /nieosiagalny/.test(H.text(out)));
 
+console.log('\n-- limit transferu --');
+
+/* Odczyt z zywego MC888 (2026-08-11) razem ze zrzutem z panelu modemu:
+   "Uzyto: 148.77GB / 1.04TB", "Do wykorzystania 0.89TB". */
+function withLimit(extra) {
+	var st = {
+		_timestamp: T0,
+		data_volume_limit_switch: '1',
+		data_volume_limit_size: '1070_1024',
+		data_volume_limit_unit: 'data',
+		data_volume_alert_percent: '100',
+		monthly_rx_bytes: '155634224658',
+		monthly_tx_bytes: '4260354779'
+	};
+	for (var k in (extra || {})) st[k] = extra[k];
+	return st;
+}
+
+function fillOf(node) {
+	var b = node.find('div').filter(function(d) {
+		return (d.attr['class'] || '') === 'cbi-progressbar';
+	})[0];
+	return b ? { title: b.attr.title, width: b.kids[0].attr.style } : null;
+}
+
+var TiB = 1024 * 1024 * 1024 * 1024;
+
+ok('rozmiar limitu wg kodowania "<liczba>_<MB>"',
+	Math.abs(H.limitBytes(withLimit()) / TiB - 1.0449) < 0.001,
+	(H.limitBytes(withLimit()) / TiB).toFixed(4) + ' TiB');
+
+var dl = H.dataLimit(withLimit());
+ok('sekcja limitu powstaje', dl !== null);
+
+var t = dl ? dl.text() : '';
+ok('zuzycie z sumy licznikow miesiecznych', /148\.91 GiB/.test(t), t);
+ok('limit zgodny z panelem modemu (1.04TB)', /1\.04 TiB/.test(t), t);
+/* Panel pisze tu "0.89TB", bo dzieli jeszcze raz przez 1024 i nazywa to TB.
+   bytes() zostaje przy GiB, dopoki wartosc nie siegnie 1 TiB - ta sama liczba,
+   uczciwsza etykieta. */
+ok('reszta do wykorzystania', /Do wykorzystania: 921\.09 GiB/.test(t), t);
+ok('procent na pasku', fillOf(dl).title === '13,9%', fillOf(dl).title);
+ok('pasek wypelniony w tej samej proporcji', /width:13\.9%/.test(fillOf(dl).width),
+	fillOf(dl).width);
+ok('adnotacja mowi, ze liczy modem, nie operator', /modem, nie operator/.test(t));
+
+ok('limit wylaczony -> brak sekcji',
+	H.dataLimit(withLimit({ data_volume_limit_switch: '0' })) === null);
+ok('limit czasu polaczenia -> brak sekcji (nie o danych)',
+	H.dataLimit(withLimit({ data_volume_limit_unit: 'time' })) === null);
+ok('pole rozmiaru puste -> brak sekcji',
+	H.dataLimit(withLimit({ data_volume_limit_size: '' })) === null);
+ok('rozmiar bez czlonu jednostki -> brak sekcji',
+	H.dataLimit(withLimit({ data_volume_limit_size: '1070' })) === null);
+ok('rozmiar nieliczbowy -> brak sekcji zamiast NaN na pasku',
+	H.dataLimit(withLimit({ data_volume_limit_size: 'abc_1024' })) === null);
+ok('rozmiar zerowy -> brak sekcji',
+	H.dataLimit(withLimit({ data_volume_limit_size: '0_1024' })) === null);
+ok('modem bez licznika miesiecznego -> brak sekcji',
+	H.dataLimit(withLimit({ monthly_rx_bytes: '', monthly_tx_bytes: '' })) === null);
+
+/* Jeden licznik pusty to nie brak danych - MF79U wypelnia tylko rx. */
+ok('sam licznik rx wystarcza',
+	H.dataLimit(withLimit({ monthly_tx_bytes: '' })) !== null);
+
+var over = H.dataLimit(withLimit({ monthly_rx_bytes: String(1.2 * 1070 * 1024 * 1024 * 1024),
+                                   monthly_tx_bytes: '0' }));
+ok('przekroczenie: pasek stoi na 100%', /width:100\.0%/.test(fillOf(over).width),
+	fillOf(over).width);
+ok('przekroczenie: procent mowi prawde', fillOf(over).title === '120,0%',
+	fillOf(over).title);
+ok('przekroczenie: zamiast "do wykorzystania" jest "przekroczono o"',
+	/Przekroczono o/.test(over.text()) && !/Do wykorzystania/.test(over.text()));
+
+var warn = H.dataLimit(withLimit({ data_volume_alert_percent: '80' }));
+ok('prog ostrzezenia < 100% rysuje kreske na pasku',
+	/left:80%/.test(JSON.stringify(warn.find('div').map(function(d) {
+		return d.attr.style || '';
+	}))));
+ok('prog 100% nie rysuje kreski',
+	!/left:100%/.test(JSON.stringify(dl.find('div').map(function(d) {
+		return d.attr.style || '';
+	}))));
+
+console.log('\n-- limit na zakladce Status --');
+
+var status = H.renderStatus(withLimit({ lte_rsrp: '-87', lte_rsrq: '-11' }));
+var idxLimit = status.findIndex(function(n) { return /Zużycie limitu danych/.test(n.text()); });
+var idxLte   = status.findIndex(function(n) { return /^LTE/.test(n.text().trim()); });
+ok('sekcja limitu jest na zakladce Status', idxLimit >= 0);
+ok('sekcja limitu stoi NAD blokiem LTE', idxLimit >= 0 && idxLte > idxLimit,
+	'limit=' + idxLimit + ' lte=' + idxLte);
+ok('modem bez limitu nie dodaje sekcji do Statusu',
+	!/Zużycie limitu danych/.test(H.text(H.renderStatus({ lte_rsrp: '-87' }))));
+
 console.log(fails ? '\n' + fails + ' NIEUDANYCH\n' : '\nwszystko przechodzi\n');
 process.exit(fails ? 1 : 0);

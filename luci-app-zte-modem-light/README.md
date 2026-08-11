@@ -12,7 +12,7 @@ interfejs**.
 
 | zakładka | zawartość |
 |---|---|
-| **Status** | RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, komórki sąsiednie, identyfikacja stacji bazowej |
+| **Status** | zużycie limitu danych, RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, komórki sąsiednie, identyfikacja stacji bazowej |
 | **Wykresy** | te same metryki w czasie, osobno LTE i 5G NR — w ramach sesji przeglądarki |
 | **Modem** | model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
 | **Konfiguracja** | adres modemu, hasło, interwał, test logowania |
@@ -72,6 +72,34 @@ Pasek to natywny **`.cbi-progressbar`** z LuCI, nie własne div-y — dziedziczy
 z motywu. Warto wiedzieć, że motyw renderuje atrybut `title` jako etykietę **nad** paskiem
 (`.cbi-progressbar::before { content: attr(title) }`), więc wartość i ocena jakości
 trafiają właśnie tam, zamiast do osobnego elementu.
+
+## Zużycie limitu danych
+
+Sekcja nad blokiem LTE, ta sama informacja, którą modem pokazuje we własnym panelu:
+*Użyto: X / Y*, pasek, *Do wykorzystania: Z*. Sens jest w tym, że **nie trzeba po nią
+wchodzić do panelu modemu** — a wejście tam zabrałoby modułowi jedyną sesję admina, którą
+modem dopuszcza.
+
+Limit czyta się z modemu, nie z konfiguracji: `data_volume_limit_switch`,
+`data_volume_limit_size` (kodowanie `<liczba>_<jednostka w MB>`, patrz
+[`docs/kodowanie-pol.md`](../docs/kodowanie-pol.md#data_volume_limit_size--rozmiar-limitu)),
+`data_volume_limit_unit` i `data_volume_alert_percent`. Zużycie to suma
+`monthly_rx_bytes + monthly_tx_bytes` — modem nie podaje go osobnym polem.
+
+**Sekcja znika w całości**, gdy limit jest wyłączony albo dotyczy czasu połączenia
+(`unit = time`). To nie jest oszczędność miejsca: przy limicie czasowym pasek zużycia
+danych kłamałby o tym, co modem naprawdę pilnuje, a bez limitu zostałby sam licznik
+miesięczny — czyli zakładka Transfer, która należy do wersji pełnej.
+
+Dwie decyzje warte odnotowania:
+
+- **Próg ostrzeżenia bierzemy z modemu** (`data_volume_alert_percent`), zamiast wymyślać
+  własne stopnie. Poniżej progu pasek jest zielony, od progu czerwony; gdy próg jest
+  niższy niż 100%, staje na pasku kreska — inaczej liczba „ostrzeżenie przy 80%" nie
+  byłaby nigdzie widoczna.
+- **Wypełnienie przycinamy do 100%, procent nie.** Pasek zatrzymany na końcu bez liczby
+  wygląda jak limit wyczerpany co do bajta; etykieta mówi `120,0%`, a prawy podpis zamienia
+  się w *Przekroczono o …*.
 
 ## Wykresy — historia w ramach sesji
 

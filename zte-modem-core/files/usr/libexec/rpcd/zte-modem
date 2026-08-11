@@ -54,6 +54,12 @@ F="${F},ngbr_cell_info"
 F="${F},bandwidth"
 F="${F},Z5g_rsrp,Z5g_rsrq,Z5g_SINR,Z5g_CELL_ID,nr5g_pci,nr5g_action_band,nr5g_action_channel"
 F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
+# Limit transferu pilnowany przez sam modem. `data_volume_limit_size` jest
+# zakodowane jako "<liczba>_<jednostka w MB>" ("1070_1024" = 1070 GiB) - rozbior
+# robi widok, tak samo jak dla lte_multi_ca_scell_info. `..._unit` mowi, czy
+# limit dotyczy danych ("data"), czy czasu polaczenia ("time").
+F="${F},data_volume_limit_switch,data_volume_limit_size,data_volume_limit_unit"
+F="${F},data_volume_alert_percent"
 # Liczniki biezacego polaczenia (zeruja sie przy zestawieniu sesji PPP, w
 # odroznieniu od monthly_*, ktore chodza wg cyklu rozliczeniowego modemu).
 # Nie kazdy firmware je wypelnia - widok pomija sekcje, gdy sa puste.

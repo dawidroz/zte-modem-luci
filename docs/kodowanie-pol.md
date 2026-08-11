@@ -63,6 +63,30 @@ nie oznacza rodziny**: MF297D loguje się dokładnie jak seria MC.
 ⚠️ Konsekwencja pominięcia tej heurystyki: MC888 pokazywał PCI 11 i 133, a naprawdę
 było to **17 i 307**.
 
+## `data_volume_limit_size` — rozmiar limitu
+
+Nie liczba i nie jednostka, tylko **oba naraz, sklejone podkreśleniem**:
+
+```
+data_volume_limit_size: "1070_1024"
+                         │    └ jednostka w MB (1024 = GiB)
+                         └────── liczba jednostek
+bajty = liczba × jednostka × 1024²
+```
+
+Kodowania nie trzeba zgadywać — rozstrzyga zrzut z panelu modemu przy tej samej wartości
+pola: `1070 × 1024 MB = 1,0449 TiB`, a panel pisze **„1.04TB"**. Zgadzają się też dwie
+pozostałe liczby z tego ekranu wobec `monthly_rx + monthly_tx` z tej samej chwili.
+
+⚠️ Widać przy okazji, że **panel liczy binarnie, a etykietuje dziesiętnie** — dzieli przez
+1024 i pisze „GB". Moduł liczy tak samo, ale pisze `GiB`/`TiB`, więc przy resztce poniżej
+1 TiB pokaże `921.09 GiB` tam, gdzie panel pokazuje `0.89TB`. Ta sama wielkość.
+
+Towarzyszące pola są zwykłe: `data_volume_limit_switch` (`0`/`1`),
+`data_volume_alert_percent` (liczba procent) i `data_volume_limit_unit` — `data` albo
+`time`, bo modem umie limitować także **czas połączenia**, i wtedy `..._size` znaczy coś
+innego niż bajty.
+
 ## Co jest dziesiętne mimo wszystko
 
 Nie wszystko jest hexem. Pasma i kanały są **dziesiętne**:

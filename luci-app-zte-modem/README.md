@@ -10,7 +10,9 @@ i nie należy do niej dokładać rzeczy z listy poniżej.
 ## Co ma dojść ponad wersję light
 
 - **zakładka Transfer** — licznik miesięczny i bieżącej sesji z podziałem pobrane/wysłane,
-  prędkość chwilowa skalowana sufitem teoretycznym
+  prędkość chwilowa skalowana sufitem teoretycznym. ⚠️ Samo **zużycie limitu** jest już
+  w light (sekcja nad LTE na Statusie) — tutaj dochodzi rozbicie rx/tx, prędkość i liczniki
+  bieżącego połączenia
 - **trwała historia sygnału** — RSRP/RSRQ/SINR przeżywające przeładowanie strony
   i restart routera
 - statystyki transferu dłuższe niż licznik miesięczny modemu

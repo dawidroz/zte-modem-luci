@@ -64,9 +64,11 @@ poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 
 ## Liczniki transferu
 
-> ℹ️ Pola są **pobierane przez core**, ale wersja light ich nie pokazuje — zakładka
-> Transfer należy do [wersji pełnej](../luci-app-zte-modem/README.md). Ustalenia poniżej
-> dotyczą samych pól i zostają w mocy dla obu wersji.
+> ℹ️ Pola są **pobierane przez core**, a wersja light pokazuje z nich tylko **zużycie
+> limitu** (sekcja nad LTE na zakładce Status). Rozbicie rx/tx, prędkość chwilowa
+> i liczniki bieżącej sesji to zakładka Transfer, czyli
+> [wersja pełna](../luci-app-zte-modem/README.md). Ustalenia poniżej dotyczą samych pól
+> i zostają w mocy dla obu wersji.
 
 | pole | znaczenie |
 |---|---|
@@ -74,6 +76,25 @@ poprawnie podpisanego `lte_rssi` (`"-73"`) to operacja pusta.
 | `realtime_rx_bytes` / `realtime_tx_bytes` | bajty bieżącego połączenia, zerują się przy zestawieniu sesji |
 | `realtime_rx_thrpt` / `realtime_tx_thrpt` | prędkość chwilowa w **bajtach na sekundę** |
 | `realtime_time` | czas trwania bieżącego połączenia [s] |
+
+### Limit pilnowany przez modem
+
+| pole | wartość na MC888 | znaczenie |
+|---|---|---|
+| `data_volume_limit_switch` | `1` | czy modem pilnuje limitu |
+| `data_volume_limit_size` | `1070_1024` | **`<liczba>_<jednostka w MB>`** — patrz [`kodowanie-pol.md`](kodowanie-pol.md#data_volume_limit_size--rozmiar-limitu) |
+| `data_volume_limit_unit` | `data` | `data` = limit na dane, `time` = na czas połączenia |
+| `data_volume_alert_percent` | `100` | próg ostrzeżenia [%] |
+
+Zużycie to zwykła suma `monthly_rx_bytes + monthly_tx_bytes` — modem nie podaje go osobnym
+polem. Widok pokazuje sekcję **tylko** dla `switch=1` i `unit=data`: przy limicie czasowym
+pasek zużycia danych kłamałby o tym, co jest pilnowane, a bez limitu zostałby sam licznik
+miesięczny, czyli już zakładka Transfer.
+
+⚠️ `date_month` (`20260908`) wygląda na datę następnego zerowania, ale **nie zgadza się**
+z `monthly_time` — 5,5 dnia połączenia przy 3,5 dnia od domniemanego początku cyklu.
+Semantyka nierozstrzygnięta, więc pola nie używamy: lepiej nie pokazywać daty zerowania
+wcale, niż pokazać zmyśloną.
 
 ⚠️ Liczniki są **modemu, nie routera** — nie zgadzają się z ruchem mierzonym na
 interfejsie WAN i nie da się ich wyzerować z poziomu modułu (zakres tylko do odczytu).

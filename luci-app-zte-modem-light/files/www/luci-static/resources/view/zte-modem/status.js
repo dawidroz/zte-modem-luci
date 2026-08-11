@@ -69,6 +69,17 @@ function txt(v) {
 	return (v === undefined || v === null || v === '') ? '–' : String(v);
 }
 
+/* Jednostki IEC, nie SI. Panel modemu liczy binarnie, ale etykietuje "GB"/"TB"
+   - my liczymy tak samo, a piszemy GiB/TiB, zeby liczba i jednostka mowily to
+   samo. */
+function bytes(v) {
+	var n = num(v);
+	if (n === null) return '–';
+	var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'], i = 0;
+	while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+	return n.toFixed(i ? 2 : 0) + ' ' + u[i];
+}
+
 function quality(kind, v) {
 	var t = TIERS[kind], n = num(v);
 	if (!t || n === null) return null;
@@ -608,6 +619,106 @@ function banner(text, color) {
 	}, text);
 }
 
+/* --- limit transferu pilnowany przez modem --------------------------------
+ *
+ * `data_volume_limit_size` jest zakodowane jako "<liczba>_<jednostka w MB>":
+ * "1070_1024" to 1070 x 1024 MB. Kodowania nie zgadywalem - rozstrzyga zrzut
+ * z panelu modemu, ktory przy tej samej wartosci pola pisze "1.04TB":
+ * 1070 x 1024 MB = 1,0449 TiB. Zgadzaja sie tez pozostale dwie liczby z panelu
+ * ("148.77GB" uzyte i "0.89TB" do wykorzystania) wobec monthly_rx + monthly_tx
+ * z tej samej chwili.
+ *
+ * Widac przy okazji, ze panel LICZY BINARNIE, a ETYKIETUJE DZIESIETNIE - dzieli
+ * przez 1024 i pisze "GB". Nie powtarzamy tego: liczymy tak samo, ale piszemy
+ * GiB/TiB, wiec przy resztce ponizej 1 TiB wyjdzie "921.09 GiB" tam, gdzie panel
+ * pokazuje "0.89TB". Ta sama wielkosc, uczciwsza etykieta.
+ */
+function limitBytes(st) {
+	var f = String(st.data_volume_limit_size || '').split('_');
+	if (f.length < 2) return null;
+
+	var size = num(f[0]), unit = num(f[1]);
+	if (size === null || unit === null || size <= 0 || unit <= 0) return null;
+
+	return size * unit * 1024 * 1024;
+}
+
+/* Sekcja powstaje tylko dla limitu NA DANE i tylko wtedy, gdy modem go pilnuje.
+ *
+ * Bez ustawionego limitu nie ma czego pokazywac: sam licznik miesieczny to juz
+ * zakladka Transfer, a ta nalezy do wersji pelnej. Modem umie tez limit CZASU
+ * polaczenia (`data_volume_limit_unit` = "time") - wtedy pasek zuzycia danych
+ * klamalby o tym, co jest pilnowane, wiec tez go nie ma.
+ */
+function dataLimit(st) {
+	if (String(st.data_volume_limit_switch) !== '1') return null;
+
+	var unit = String(st.data_volume_limit_unit || 'data');
+	if (unit !== 'data') return null;
+
+	var limit = limitBytes(st);
+	if (limit === null) return null;
+
+	var rx = num(st.monthly_rx_bytes), tx = num(st.monthly_tx_bytes);
+	if (rx === null && tx === null) return null;
+
+	var used = (rx || 0) + (tx || 0);
+	var pct  = used / limit * 100;
+	var left = limit - used;
+
+	/* Prog ostrzezenia bierzemy z modemu, zamiast wymyslac wlasny - to ta sama
+	   liczba, ktora modem pokazuje w panelu i wg ktorej alarmuje. */
+	var alert = num(st.data_volume_alert_percent);
+	if (alert === null || alert <= 0 || alert > 100) alert = 100;
+
+	/* Wypelnienie przycinamy do 100%, ale procent w etykiecie zostaje PRAWDZIWY:
+	   pasek zatrzymany na koncu bez liczby wyglada jak limit wyczerpany co do
+	   bajta, a nie przekroczony. */
+	var fill = Math.max(0, Math.min(100, pct));
+
+	var bar = E('div', {
+		'class': 'cbi-progressbar',
+		'title': pct.toFixed(1).replace('.', ',') + '%'
+	}, E('div', {
+		'style': 'width:' + fill.toFixed(1) + '%;background:' +
+		         (pct >= alert ? COLORS.poor : COLORS.good)
+	}));
+
+	/* Kreska progu tylko wtedy, gdy prog cokolwiek wnosi - przy 100% stanelaby
+	   na krancu paska i udawala podzialke. */
+	var track = (alert < 100)
+		? E('div', { 'style': 'position:relative' }, [
+			bar,
+			E('div', {
+				'style': 'position:absolute;top:0;bottom:0;left:' + alert + '%;' +
+				         'width:2px;background:currentColor;opacity:.5',
+				'title': _('Próg ostrzeżenia modemu') + ': ' + alert + '%'
+			})
+		])
+		: bar;
+
+	return E('div', { 'style': 'margin-bottom:1.2em' }, [
+		E('h4', { 'style': 'margin:.3em 0 .5em' }, _('Zużycie limitu danych')),
+		E('div', {
+			'style': 'display:flex;flex-wrap:wrap;justify-content:space-between;' +
+			         'align-items:baseline;gap:.5em 1em;margin-bottom:.3em'
+		}, [
+			E('span', {}, [
+				E('span', { 'style': 'opacity:.75' }, _('Użyto') + ': '),
+				E('span', { 'style': 'font-weight:600' }, bytes(used)),
+				E('span', { 'style': 'opacity:.75' }, ' / ' + bytes(limit))
+			]),
+			E('span', { 'style': 'opacity:.75' }, (left >= 0)
+				? _('Do wykorzystania') + ': ' + bytes(left)
+				: _('Przekroczono o') + ' ' + bytes(-left))
+		]),
+		track,
+		E('div', { 'style': 'font-size:.8em;opacity:.6;margin-top:.3em' },
+			_('Wykorzystanie jest przybliżone — liczy je modem, nie operator, ' +
+			  'i zeruje wg własnego cyklu rozliczeniowego.'))
+	]);
+}
+
 function renderStatus(st) {
 	st = st || {};
 	var out = [];
@@ -654,6 +765,10 @@ function renderStatus(st) {
 				st.signalbar ? (st.signalbar + '/5') : '–')
 		])
 	]));
+
+	/* Limit transferu - nad LTE, bo dotyczy calego lacza, a nie technologii. */
+	var dl = dataLimit(st);
+	if (dl) out.push(dl);
 
 	/* LTE */
 	var hasLte = [num(st.lte_rsrp), num(st.lte_rsrq), rssiOf(st), snrOf(st)]
