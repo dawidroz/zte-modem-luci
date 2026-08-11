@@ -292,6 +292,47 @@ ok('prog 100% nie rysuje kreski',
 		return d.attr.style || '';
 	}))));
 
+console.log('\n-- termin zerowania licznika --');
+
+/* Data liczona wzgledem "dzis", zeby test nie zestarzal sie razem z kalendarzem. */
+function ymd(offsetDays) {
+	var d = new Date();
+	d.setDate(d.getDate() + offsetDays);
+	return String(d.getFullYear()) +
+	       ('0' + (d.getMonth() + 1)).slice(-2) +
+	       ('0' + d.getDate()).slice(-2);
+}
+
+ok('YYYYMMDD rozebrane na date', (function() {
+	var d = H.resetDate('20260908');
+	return d && d.getFullYear() === 2026 && d.getMonth() === 8 && d.getDate() === 8;
+})());
+ok('miesiac 13 odrzucony, nie przewiniety na kolejny rok',
+	H.resetDate('20261332') === null);
+ok('dzien 31 w miesiacu 30-dniowym odrzucony', H.resetDate('20260931') === null);
+ok('za krotkie pole odrzucone', H.resetDate('2026090') === null);
+ok('puste pole odrzucone', H.resetDate('') === null);
+
+var soon = H.dataLimit(withLimit({ date_month: ymd(28) }));
+ok('termin obok pozostalej ilosci', /Do wykorzystania:\s+\S+ GiB\s+·\s+do \S+\s+\(za 28 dni\)/.test(soon.text()),
+	soon.text().slice(0, 120));
+
+ok('jutro: liczba pojedyncza', /\(za 1 dzień\)/.test(
+	H.dataLimit(withLimit({ date_month: ymd(1) })).text()));
+ok('dzis: bez licznika dni', /\(dziś\)/.test(
+	H.dataLimit(withLimit({ date_month: ymd(0) })).text()));
+ok('data miniona -> bez terminu', !/·\s+do /.test(
+	H.dataLimit(withLimit({ date_month: ymd(-3) })).text()));
+ok('brak pola -> sekcja bez terminu, ale nadal jest',
+	!/·\s+do /.test(dl.text()) && dl !== null);
+
+var overSoon = H.dataLimit(withLimit({
+	date_month: ymd(28),
+	monthly_rx_bytes: String(1.2 * 1070 * 1024 * 1024 * 1024), monthly_tx_bytes: '0'
+}));
+ok('termin widoczny takze przy przekroczeniu',
+	/Przekroczono o\s+\S+ GiB\s+·\s+do \S+\s+\(za 28 dni\)/.test(overSoon.text()), overSoon.text().slice(0, 120));
+
 console.log('\n-- limit na zakladce Status --');
 
 var status = H.renderStatus(withLimit({ lte_rsrp: '-87', lte_rsrq: '-11' }));

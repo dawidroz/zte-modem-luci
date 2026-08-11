@@ -71,8 +71,8 @@ ostrzeżenia, a wywala się dopiero u instalującego jako `error: uninstallable`
 Instalacja na routerze:
 
 ```sh
-opkg install zte-modem-core_1.1.0-r1_all.ipk luci-app-zte-modem-light_1.2.0-r1_all.ipk
-apk add --allow-untrusted zte-modem-core-1.1.0-r1.apk luci-app-zte-modem-light-1.2.0-r1.apk
+opkg install zte-modem-core_1.2.0-r1_all.ipk luci-app-zte-modem-light_1.3.0-r1_all.ipk
+apk add --allow-untrusted zte-modem-core-1.2.0-r1.apk luci-app-zte-modem-light-1.3.0-r1.apk
 ```
 
 ⚠️ **Podawać oba pakiety naraz** — instalowane osobno, widok nie znajdzie jeszcze
@@ -131,13 +131,33 @@ obecność pakietu (patrz [`docs/goform-api.md`](docs/goform-api.md#zależności
 
 ### Co jest sprawdzone, a co nie
 
-✅ `.ipk` — zweryfikowany prawdziwym `opkg install --noaction` na OpenWrt 24.10.2
-(aarch64), oba pakiety naraz, bez błędów.
+✅ `.ipk` — `opkg install` na OpenWrt 24.10.4 w kontenerze (obraz `openwrt/rootfs`), oba
+pakiety naraz, zależności dociągnięte z repozytoriów. Wcześniej też `--noaction` na
+prawdziwym 24.10.2 (aarch64).
 
-⚠️ `.apk` — zweryfikowany **tylko strukturalnie**: `apk adbdump` z apk-tools 3.0.7 czyta
-metadane, zależności, tryby plików i własność `root:root`. **Nie sprawdzony instalacją na
-prawdziwym OpenWrt z apk**, bo oba dostępne routery są na opkg. Gdyby tamtejsze apk
+✅ `.apk` — `apk add --allow-untrusted` na **OpenWrt 25.12-SNAPSHOT** (apk-tools 3.0.5)
+w kontenerze, oba pakiety naraz, `curl` dociągnięty z repozytorium. Gdyby jakieś apk
 odrzuciło format, jest przełącznik `--apk-compat` (np. `--apk-compat 3.0.0_pre3`).
+
+⚠️ To zastrzeżenie stało tu wcześniej z powodem: dopóki `.apk` był sprawdzany **tylko
+strukturalnie** (`apk adbdump` czyta metadane, więc „wygląda dobrze"), przez dwa wydania
+jechał w nim błąd `arch: all`, przez który **nie dawało się go zainstalować**. Wyszło
+dopiero ze zgłoszenia użytkownika. Struktura czytelna dla narzędzia to nie to samo, co
+pakiet, który wchodzi.
+
+```sh
+# Test instalacji bez routera z apk:
+docker run --rm -v "$PWD/build:/pkg:ro" openwrt/rootfs:x86_64-openwrt-25.12 \
+  sh -c 'cd /pkg && apk add --allow-untrusted ./zte-modem-core-*.apk ./luci-app-*.apk'
+```
+
+⚠️ Obraz docker OpenWrt **nie ma linii `arch` w `/etc/opkg.conf`**, więc test `.ipk` w
+kontenerze wymaga ich dopisania — inaczej odbija się od „incompatible with the
+architectures configured", czego na prawdziwym routerze nie ma:
+
+```sh
+printf 'arch all 100\narch noarch 200\narch x86_64 300\n' >> /etc/opkg.conf
+```
 
 ## Sprawdzone modemy
 

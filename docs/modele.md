@@ -91,10 +91,28 @@ polem. Widok pokazuje sekcję **tylko** dla `switch=1` i `unit=data`: przy limic
 pasek zużycia danych kłamałby o tym, co jest pilnowane, a bez limitu zostałby sam licznik
 miesięczny, czyli już zakładka Transfer.
 
-⚠️ `date_month` (`20260908`) wygląda na datę następnego zerowania, ale **nie zgadza się**
-z `monthly_time` — 5,5 dnia połączenia przy 3,5 dnia od domniemanego początku cyklu.
-Semantyka nierozstrzygnięta, więc pola nie używamy: lepiej nie pokazywać daty zerowania
-wcale, niż pokazać zmyśloną.
+### `date_month` — termin zerowania licznika
+
+| pole | wartość na MC888 | znaczenie |
+|---|---|---|
+| `date_month` | `20260908` | data najbliższego zerowania licznika, `YYYYMMDD` |
+
+✅ Potwierdzone z dwóch niezależnych stron (2026-08-11):
+
+1. panel modemu ma **„Zresetuj licznik (dzień miesiąca)" ustawione na `8`**, a pole
+   wskazuje `2026-09-08` — ten sam dzień, najbliższe wystąpienie;
+2. zegar samego modemu (nagłówek `Date` z jego serwera HTTP) szedł zgodnie z routerem,
+   więc ta data leży w **przyszłości** — nie jest zapisem ostatniego zerowania.
+
+⚠️ **Dnia miesiąca modem nie wystawia osobnym polem.** Sprawdzone i puste:
+`data_volume_limit_day`, `monthly_reset_day`, `reset_day`, `data_clear_day`,
+`data_volume_clear_day`, `auto_clear_day`, `monthly_clear_day`, `limit_day`, `month_day`.
+`date_month` jest więc jedynym źródłem terminu — widok odrzuca datę z przeszłości, bo
+znaczyłaby, że pole nie jest tym, czym je bierzemy.
+
+⚠️ `monthly_time` **nie jest** licznikiem czasu w ramach cyklu: pokazywał 5,7 dnia
+połączenia przy 3,8 dnia od początku cyklu (8. dzień miesiąca). Do czego się odnosi —
+nierozstrzygnięte; nie używamy go.
 
 ⚠️ Liczniki są **modemu, nie routera** — nie zgadzają się z ruchem mierzonym na
 interfejsie WAN i nie da się ich wyzerować z poziomu modułu (zakres tylko do odczytu).

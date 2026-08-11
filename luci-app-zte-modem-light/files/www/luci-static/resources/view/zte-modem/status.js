@@ -645,6 +645,55 @@ function limitBytes(st) {
 	return size * unit * 1024 * 1024;
 }
 
+/* `date_month` - data najblizszego zerowania licznika, format YYYYMMDD
+ * ("20260908").
+ *
+ * Znaczenie potwierdzone z dwoch stron, nie zalozone:
+ *
+ *  1. panel modemu ma "Zresetuj licznik (dzien miesiaca)" ustawione na 8,
+ *     a pole pokazuje 2026-09-08 - ten sam dzien, najblizsze wystapienie;
+ *  2. zegar samego modemu (naglowek `Date` jego serwera HTTP) szedl zgodnie
+ *     z routerem, wiec ta data lezy w PRZYSZLOSCI, a nie jest zapisem
+ *     ostatniego zerowania.
+ *
+ * Date z przeszlosci odrzucamy - znaczylaby, ze pole nie jest tym, czym je
+ * bierzemy, a lepiej nie pokazac terminu niz pokazac miniony.
+ *
+ * ⚠️ Osobnego pola z samym dniem miesiaca modem NIE wystawia (sprawdzone
+ * kilkanascie nazw), wiec ta data jest jedynym zrodlem terminu.
+ */
+function resetDate(v) {
+	var m = String(v || '').match(/^(\d{4})(\d{2})(\d{2})$/);
+	if (!m) return null;
+
+	var y = +m[1], mo = +m[2], d = +m[3];
+	var dt = new Date(y, mo - 1, d);
+
+	/* Odsiewa "20261332" i spolke - Date przewinalby to cicho na kolejny
+	   miesiac i pokazalibysmy wymyslona date. */
+	if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d)
+		return null;
+
+	return dt;
+}
+
+/* Termin obok pozostalej ilosci: "do 8.09.2026 (za 28 dni)". Sama ilosc nie
+   mowi, czy trzeba ja rozlozyc na dwa dni, czy na miesiac. */
+function until(st) {
+	var dt = resetDate(st.date_month);
+	if (!dt) return '';
+
+	/* Do polnocy dnia zerowania, nie do teraz - inaczej termin "dzis" znikalby
+	   juz o pierwszej w nocy. */
+	var days = Math.ceil((dt - new Date()) / 86400000);
+	if (days < 0) return '';
+
+	var when = (days === 0) ? _('dziś')
+	         : _('za') + ' ' + days + ' ' + (days === 1 ? _('dzień') : _('dni'));
+
+	return '  ·  ' + _('do') + ' ' + dt.toLocaleDateString() + '  (' + when + ')';
+}
+
 /* Sekcja powstaje tylko dla limitu NA DANE i tylko wtedy, gdy modem go pilnuje.
  *
  * Bez ustawionego limitu nie ma czego pokazywac: sam licznik miesieczny to juz
@@ -710,9 +759,11 @@ function dataLimit(st) {
 				E('span', { 'style': 'font-weight:600' }, bytes(used)),
 				E('span', { 'style': 'opacity:.75' }, ' / ' + bytes(limit))
 			]),
-			E('span', { 'style': 'opacity:.75' }, (left >= 0)
+			/* Termin dotyczy tak samo przekroczenia - wtedy mowi, jak dlugo
+			   jeszcze bedzie bolec. */
+			E('span', { 'style': 'opacity:.75' }, ((left >= 0)
 				? _('Do wykorzystania') + ': ' + bytes(left)
-				: _('Przekroczono o') + ' ' + bytes(-left))
+				: _('Przekroczono o') + ' ' + bytes(-left)) + until(st))
 		]),
 		track,
 		E('div', { 'style': 'font-size:.8em;opacity:.6;margin-top:.3em' },

@@ -60,6 +60,10 @@ F="${F},monthly_tx_bytes,monthly_rx_bytes,realtime_tx_thrpt,realtime_rx_thrpt"
 # limit dotyczy danych ("data"), czy czasu polaczenia ("time").
 F="${F},data_volume_limit_switch,data_volume_limit_size,data_volume_limit_unit"
 F="${F},data_volume_alert_percent"
+# Data najblizszego zerowania licznika (YYYYMMDD). Jedyne zrodlo - dnia miesiaca
+# modem nie wystawia osobnym polem, choc ma go w ustawieniach ("Zresetuj licznik
+# (dzien miesiaca)"). Sprawdzone: 8 w panelu -> date_month "20260908".
+F="${F},date_month"
 # Liczniki biezacego polaczenia (zeruja sie przy zestawieniu sesji PPP, w
 # odroznieniu od monthly_*, ktore chodza wg cyklu rozliczeniowego modemu).
 # Nie kazdy firmware je wypelnia - widok pomija sekcje, gdy sa puste.

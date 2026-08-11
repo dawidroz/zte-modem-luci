@@ -80,6 +80,12 @@ Sekcja nad blokiem LTE, ta sama informacja, którą modem pokazuje we własnym p
 wchodzić do panelu modemu** — a wejście tam zabrałoby modułowi jedyną sesję admina, którą
 modem dopuszcza.
 
+Przy pozostałej ilości stoi **termin** — *do 8.09.2026 (za 28 dni)* — bo sama ilość nie
+mówi, czy trzeba ją rozłożyć na dwa dni, czy na miesiąc. Data pochodzi z `date_month`
+i jest jedynym źródłem: dnia miesiąca modem nie wystawia osobnym polem, choć ma go
+w ustawieniach. Datę z przeszłości widok odrzuca — znaczyłaby, że pole nie jest tym, czym
+je bierzemy, a lepiej nie pokazać terminu niż pokazać miniony.
+
 Limit czyta się z modemu, nie z konfiguracji: `data_volume_limit_switch`,
 `data_volume_limit_size` (kodowanie `<liczba>_<jednostka w MB>`, patrz
 [`docs/kodowanie-pol.md`](../docs/kodowanie-pol.md#data_volume_limit_size--rozmiar-limitu)),
