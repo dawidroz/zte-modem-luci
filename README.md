@@ -13,9 +13,10 @@ których przy CPE po Ethernecie po prostu nie ma.
 | katalog | rola |
 |---|---|
 | [`zte-modem-core/`](zte-modem-core/) | **backend** — obiekt ubus `zte-modem`, bez interfejsu |
-| [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 3 zakładki (Status, Modem, Konfiguracja), tylko odczyt, zero zapisu do flasha |
-| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — transfer, historia sygnału i wykresy, *planowana* |
+| [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 4 zakładki (Status, Wykresy, Modem, Konfiguracja), tylko odczyt, zero zapisu do flasha |
+| [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — transfer i trwała historia sygnału, *planowana* |
 | [`docs/`](docs/) | dokumentacja protokołu, wspólna dla obu wersji |
+| [`tests/`](tests/) | testy widoku w `node` (`node tests/status.test.js`), bez zależności |
 
 Widoki dzielą całą logikę odczytu, dlatego backend jest osobnym pakietem — a nie
 kopiowany. Obie wersje używają tych samych identyfikatorów runtime
@@ -65,8 +66,8 @@ Pakiety są architektury **`all`** — to sam kod w shellu i JS, nic się nie ko
 Instalacja na routerze:
 
 ```sh
-opkg install zte-modem-core_1.0.0-r1_all.ipk luci-app-zte-modem-light_1.0.0-r1_all.ipk
-apk add --allow-untrusted zte-modem-core-1.0.0-r1.apk luci-app-zte-modem-light-1.0.0-r1.apk
+opkg install zte-modem-core_1.0.0-r1_all.ipk luci-app-zte-modem-light_1.1.0-r1_all.ipk
+apk add --allow-untrusted zte-modem-core-1.0.0-r1.apk luci-app-zte-modem-light-1.1.0-r1.apk
 ```
 
 ⚠️ **Podawać oba pakiety naraz** — instalowane osobno, widok nie znajdzie jeszcze

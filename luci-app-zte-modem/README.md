@@ -11,10 +11,17 @@ i nie należy do niej dokładać rzeczy z listy poniżej.
 
 - **zakładka Transfer** — licznik miesięczny i bieżącej sesji z podziałem pobrane/wysłane,
   prędkość chwilowa skalowana sufitem teoretycznym
-- historia sygnału (RSRP/RSRQ/SINR w czasie)
-- wykresy
+- **trwała historia sygnału** — RSRP/RSRQ/SINR przeżywające przeładowanie strony
+  i restart routera
 - statystyki transferu dłuższe niż licznik miesięczny modemu
 - prawdopodobnie: log zmian komórki / stacji bazowej
+
+⚠️ **Same wykresy są już w wersji light** — zakładka Wykresy, bufor w pamięci przeglądarki,
+zerowany przy `F5`. Tutaj dochodzi **nośnik**, nie rysowanie: kolektor zbierający w tle,
+niezależnie od tego, czy ktoś ma otwartą przeglądarkę. Funkcje `chartCard()`,
+`chartBlock()` i `S()` z widoku light są gotowe do przeniesienia — razem ze skalą z
+`TIERS` i rozrywaniem linii na przerwach, które przy dłuższych szeregach robi się
+ważniejsze, nie mniej ważne.
 
 ### Transfer — kod już był, jest w historii
 
@@ -41,8 +48,8 @@ ruszać — dane czekają w `ubus call zte-modem status`.
 dekodowanie pól i cache są identyczne dla obu wersji. Duplikowanie tego kodu jest
 zabronione; poprawka pułapki firmware'u ma działać w obu wersjach naraz.
 
-⚠️ **Core musi pozostać read-only.** Historia wymaga zapisu, ale zapis nie może trafić
-do core, bo złamałby niezmiennik wersji light („zero zapisu do pamięci trwałej").
+⚠️ **Core musi pozostać read-only.** Trwała historia wymaga zapisu, ale zapis nie może
+trafić do core, bo złamałby niezmiennik wersji light („zero zapisu do pamięci trwałej").
 Dlatego:
 
 - kolektor historii jest **osobnym procesem w tym pakiecie**, nie rozszerzeniem core,

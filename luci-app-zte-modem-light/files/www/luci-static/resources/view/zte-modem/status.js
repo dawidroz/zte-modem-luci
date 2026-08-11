@@ -850,6 +850,372 @@ function renderDevice(st) {
 	return out;
 }
 
+/* --- zakladka "Wykresy": historia sygnalu w ramach sesji ------------------
+ *
+ * Bufor zyje WYLACZNIE w pamieci przegladarki - zadnego localStorage, zadnego
+ * zapisu na routerze. To nie jest ograniczenie techniczne, tylko niezmiennik
+ * wersji light ("zero zapisu do pamieci trwalej"). Trwale zbieranie historii
+ * ma dojsc dopiero w luci-app-zte-modem, osobnym kolektorem z wlasnym obiektem
+ * ubus - patrz ../luci-app-zte-modem/README.md.
+ *
+ * Bufor stoi w zasiegu MODULU, nie w render(): LuCI nie laduje modulu widoku
+ * drugi raz, wiec przejscie na inna strone panelu i powrot nie gubi historii.
+ * Przeladowanie strony (F5) - owszem, gubi. Tyle znaczy tu "sesja".
+ */
+var MAX_SAMPLES = 720;          /* ~2 godz. przy domyslnym interwale 10 s */
+var HISTORY = [];
+
+/* Jedna probka na ODCZYT MODEMU, nie na tik pollera.
+ *
+ * Core oddaje cache, dopoki jest mlodszy niz `refresh_interval` (`show_status`
+ * w rpcd/zte-modem), a przy `_stale` oddaje wprost ostatnie znane dane -
+ * w obu wypadkach `_timestamp` sie nie zmienia. Bez odsiewania po nim wykres
+ * rysowalby odcinek z powtorzonej wartosci i udawal, ze modem odpowiada.
+ *
+ * SNR i RSSI biore przez snrOf()/rssiOf(), bo nazwy pol i znak roznia sie
+ * miedzy modelami - te same poprawki co na zakladce Status.
+ */
+function sample(st) {
+	var t = num(st && st._timestamp);
+	if (t === null) return;
+
+	var last = HISTORY[HISTORY.length - 1];
+	if (last && last.t === t) return;
+
+	HISTORY.push({
+		t:        t,
+		lte_rsrp: num(st.lte_rsrp),
+		lte_rsrq: num(st.lte_rsrq),
+		lte_rssi: rssiOf(st),
+		lte_snr:  snrOf(st),
+		nr_rsrp:  num(st.Z5g_rsrp),
+		nr_rsrq:  num(st.Z5g_rsrq),
+		nr_sinr:  num(st.Z5g_SINR)
+	});
+
+	if (HISTORY.length > MAX_SAMPLES)
+		HISTORY.splice(0, HISTORY.length - MAX_SAMPLES);
+}
+
+/* E() z LuCI robi document.createElement, czyli dla <svg> dostalibysmy
+   HTMLUnknownElement, ktory sie nie rysuje. Elementy graficzne musza powstac
+   w przestrzeni nazw SVG. */
+var SVG_NS = 'http://www.w3.org/2000/svg';
+
+function S(tag, attr, children) {
+	var el = document.createElementNS(SVG_NS, tag);
+
+	for (var k in attr)
+		if (attr[k] !== null && attr[k] !== undefined)
+			el.setAttribute(k, String(attr[k]));
+
+	(children || []).forEach(function(c) {
+		el.appendChild((c instanceof Node) ? c : document.createTextNode(String(c)));
+	});
+
+	return el;
+}
+
+var LTE_SERIES = [
+	{ key: 'lte_rsrp', label: 'RSRP', kind: 'rsrp', unit: 'dBm' },
+	{ key: 'lte_rsrq', label: 'RSRQ', kind: 'rsrq', unit: 'dB'  },
+	{ key: 'lte_rssi', label: 'RSSI', kind: 'rssi', unit: 'dBm' },
+	{ key: 'lte_snr',  label: 'SNR',  kind: 'sinr', unit: 'dB'  }
+];
+
+var NR_SERIES = [
+	{ key: 'nr_rsrp', label: 'RSRP', kind: 'rsrp', unit: 'dBm' },
+	{ key: 'nr_rsrq', label: 'RSRQ', kind: 'rsrq', unit: 'dB'  },
+	{ key: 'nr_sinr', label: 'SINR', kind: 'sinr', unit: 'dB'  }
+];
+
+var CHART = { w: 480, h: 150, padL: 36, padR: 8, padT: 10, padB: 8 };
+
+/* Krycie pasow jakosci - inne dla kazdego motywu.
+ *
+ * Jedna wartosc nie obsluguje obu: te same 12% ginie na bialym tle (pasy
+ * wychodza blade i nie da sie ich rozroznic), a na ciemnym zamienia kolor
+ * w bloto, bo pastel zmieszany z prawie czarnym po prostu ciemnieje.
+ * Wyzej na ciemnym, bo tam kolor musi sie PRZEBIC przez tlo, a nie tylko
+ * je zabarwic.
+ */
+var BAND_OPACITY = { light: 0.18, dark: 0.30 };
+
+/* Ciemny motyw rozpoznajemy po JASNOSCI KOLORU TEKSTU, a nie przez
+ * prefers-color-scheme: czesc motywow LuCI ma wlasny przelacznik i nie idzie
+ * za ustawieniem systemu, wiec zapytanie medialne klamaloby wlasnie tam, gdzie
+ * uzytkownik swiadomie wybral ciemny. Kolor tekstu bierze sie z motywu bez
+ * wzgledu na to, skad motyw wie, ze jest ciemny.
+ */
+function darkTheme() {
+	if (typeof getComputedStyle !== 'function') return false;
+
+	var m = String(getComputedStyle(document.body).color || '')
+		.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+	if (!m) return false;
+
+	/* Luminancja wg BT.709 - zielony wazy najwiecej, niebieski najmniej. */
+	var lum = (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255;
+
+	return lum > 0.5;   /* jasny tekst = ciemne tlo */
+}
+
+function bandOpacity() {
+	return darkTheme() ? BAND_OPACITY.dark : BAND_OPACITY.light;
+}
+
+function clock(t) {
+	return new Date(t * 1000).toLocaleTimeString();
+}
+
+function spanText(sec) {
+	if (sec < 90)   return Math.round(sec) + ' s';
+	if (sec < 5400) return Math.round(sec / 60) + ' min';
+	return (sec / 3600).toFixed(1).replace('.', ',') + ' ' + _('godz.');
+}
+
+/* Wykres jednej metryki.
+ *
+ * Skala pionowa to TIERS - te same progi, co paski na zakladce Status, wiec
+ * pasy tla czytaja sie tak samo jak kolor paska i nie trzeba uczyc sie drugiej
+ * skali. Konsekwencja: wartosci poza zakresem sa PRZYCINANE do krawedzi,
+ * dokladnie jak dlugosc paska w quality().
+ *
+ * Os pozioma idzie po CZASIE, nie po numerze probki. Odczyty gubia sie na dwa
+ * sposoby - modem nie odpowiada, albo LuCI wstrzymuje poller, gdy karta
+ * przegladarki jest niewidoczna - a przy skali po indeksie obie przerwy
+ * zniknelyby, sciskajac wykres i udajac ciaglosc pomiaru. Dlatego przerwa
+ * dluzsza niz `gapLimit` rozrywa linie zamiast ja przeciagac.
+ *
+ * Linia rysowana `currentColor`, wiec dziedziczy kolor tekstu motywu i jest
+ * czytelna tak samo w jasnym, jak i ciemnym.
+ */
+function chartCard(def, samples, gapLimit) {
+	var t = TIERS[def.kind];
+
+	var vals = samples.map(function(s) { return s[def.key]; })
+	                  .filter(function(v) { return v !== null; });
+
+	/* Metryka, ktorej model nie zna, nie istnieje - ta sama zasada co metric(). */
+	if (!vals.length) return null;
+
+	var x0 = CHART.padL, x1 = CHART.w - CHART.padR;
+	var y0 = CHART.padT, y1 = CHART.h - CHART.padB;
+
+	var tMin = samples[0].t, tMax = samples[samples.length - 1].t;
+
+	function X(s) {
+		return (tMax === tMin) ? x1 : x0 + (s.t - tMin) / (tMax - tMin) * (x1 - x0);
+	}
+
+	function Y(v) {
+		var c = Math.max(t.min, Math.min(t.max, v));
+		return y1 - (c - t.min) / (t.max - t.min) * (y1 - y0);
+	}
+
+	/* Pasy jakosci: kazdy stopien od swojego progu do progu stopnia wyzszego. */
+	var alpha = bandOpacity();
+	var bands = [], top = t.max;
+	t.steps.forEach(function(step) {
+		var bottom = (step.from === null) ? t.min : Math.max(t.min, step.from);
+		if (bottom < top)
+			bands.push(S('rect', {
+				x: x0, y: Y(top), width: x1 - x0, height: Y(bottom) - Y(top),
+				fill: step.color, opacity: alpha
+			}));
+		top = bottom;
+	});
+
+	/* Opis osi: krance zakresu i progi miedzy stopniami. */
+	var marks = [t.max].concat(t.steps.map(function(s) { return s.from; })
+	                                  .filter(function(v) { return v !== null; }))
+	                   .concat([t.min]);
+
+	var axis = [];
+	marks.forEach(function(v, i) {
+		var y = Y(v);
+		if (i > 0 && i < marks.length - 1)
+			axis.push(S('line', { x1: x0, y1: y, x2: x1, y2: y,
+			                      stroke: 'currentColor', 'stroke-width': 0.5, opacity: 0.2 }));
+		axis.push(S('text', {
+			x: x0 - 4, y: y, 'text-anchor': 'end', 'dominant-baseline': 'middle',
+			'font-size': 10, fill: 'currentColor', opacity: 0.55
+		}, [String(v)]));
+	});
+
+	/* Rozbicie na odcinki: brak wartosci albo dziura w czasie konczy odcinek. */
+	var segs = [], cur = [];
+	samples.forEach(function(s) {
+		var v = s[def.key];
+
+		if (v === null) {
+			if (cur.length) { segs.push(cur); cur = []; }
+			return;
+		}
+
+		if (cur.length && (s.t - cur[cur.length - 1].t) > gapLimit) {
+			segs.push(cur);
+			cur = [];
+		}
+
+		cur.push(s);
+	});
+	if (cur.length) segs.push(cur);
+
+	var lines = segs.map(function(seg) {
+		var d = seg.map(function(s, i) {
+			return (i ? 'L' : 'M') + X(s).toFixed(1) + ' ' + Y(s[def.key]).toFixed(1);
+		}).join(' ');
+
+		/* Odcinek jednopunktowy: powtorzony punkt + zaokraglona koncowka daje
+		   kropke, zamiast znikac bez sladu. */
+		if (seg.length === 1)
+			d += ' L' + X(seg[0]).toFixed(1) + ' ' + Y(seg[0][def.key]).toFixed(1);
+
+		return S('path', {
+			d: d, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.5,
+			'stroke-linejoin': 'round', 'stroke-linecap': 'round', opacity: 0.85
+		});
+	});
+
+	var lastSample = null;
+	for (var i = samples.length - 1; i >= 0; i--)
+		if (samples[i][def.key] !== null) { lastSample = samples[i]; break; }
+
+	var q = quality(def.kind, lastSample[def.key]);
+
+	var dot = S('circle', {
+		cx: X(lastSample), cy: Y(lastSample[def.key]), r: 3,
+		fill: q.color, stroke: 'currentColor', 'stroke-width': 0.5
+	});
+
+	var svg = S('svg', {
+		viewBox: '0 0 ' + CHART.w + ' ' + CHART.h,
+		width: '100%', style: 'display:block;height:auto',
+		role: 'img',
+		'aria-label': def.label + ': ' + q.value + ' ' + def.unit + ', ' + q.label
+	}, bands.concat(axis, lines, [dot]));
+
+	var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+	var avg = vals.reduce(function(a, v) { return a + v; }, 0) / vals.length;
+
+	var stats = _('min') + ' ' + lo + '  ·  ' + _('śr') + ' ' + avg.toFixed(1) +
+	            '  ·  ' + _('maks') + ' ' + hi;
+
+	return E('div', {
+		'style': 'padding:10px 12px 6px;' +
+		         'border:1px solid var(--border-color-low,#ccc);border-radius:6px'
+	}, [
+		E('div', { 'style': 'display:flex;justify-content:space-between;align-items:baseline' }, [
+			E('span', { 'style': 'font-size:.85em;opacity:.75' },
+				def.label + ' [' + def.unit + ']'),
+			E('span', { 'style': 'display:flex;align-items:baseline;gap:.4em' }, [
+				/* Kolor tylko jako kropka obok wartosci: nazwany poziom niesie te
+				   sama informacje slowem, tak jak w tabeli sasiadow. */
+				E('span', { 'style': 'width:8px;height:8px;border-radius:50%;' +
+				                     'align-self:center;background:' + q.color }),
+				E('span', { 'style': 'font-weight:600' }, String(q.value)),
+				E('span', { 'style': 'font-size:.85em;opacity:.7' }, q.label)
+			])
+		]),
+		svg,
+		E('div', {
+			'style': 'display:flex;justify-content:space-between;font-size:.75em;opacity:.6'
+		}, [
+			E('span', {}, clock(tMin)),
+			E('span', {}, stats),
+			E('span', {}, clock(tMax))
+		])
+	]);
+}
+
+function chartBlock(title, series, samples, gapLimit) {
+	var cards = series.map(function(def) { return chartCard(def, samples, gapLimit); })
+	                  .filter(function(c) { return c !== null; });
+
+	if (!cards.length) return null;
+
+	/* Siatka, a nie flex-wrap jak w block().
+	 *
+	 * Przy `flex:1 1 380px` kafelek, ktory zostaje sam w wierszu, rozciaga sie
+	 * na cala szerokosc - a 5G NR ma trzy metryki, wiec przy dwoch kolumnach
+	 * SINR wychodzil dwa razy szerszy od RSRP i RSRQ. Wykresy tej samej rangi
+	 * maja byc tej samej wielkosci, bo roznica rozmiaru czyta sie jak roznica
+	 * waznosci.
+	 *
+	 * `auto-fill` (nie `auto-fit`) zostawia puste tory zamiast rozdzielac je
+	 * miedzy kafelki - to wlasnie ono trzyma szerokosc kolumny. `min(300px,100%)`
+	 * chroni przed wyjechaniem poza ekran na waskich telefonach.
+	 */
+	return E('div', { 'style': 'margin-bottom:1.2em' }, [
+		E('h4', { 'style': 'margin:.3em 0 .5em' }, title),
+		E('div', { 'style': 'display:grid;gap:8px;' +
+		                    'grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))' },
+			cards)
+	]);
+}
+
+function renderHistory(st, interval) {
+	st = st || {};
+	var out = [];
+
+	if (st._error)
+		out.push(banner(st._error, COLORS.poor));
+
+	var samples = HISTORY;
+
+	/* Dwie probki to minimum, zeby cokolwiek narysowac - z jednej wychodzi
+	   kropka bez osi czasu, co wyglada na usterke. */
+	if (samples.length < 2) {
+		out.push(banner(
+			_('Zbieram próbki — wykres pojawi się po drugim odczycie modemu (co %d s).')
+				.format(interval),
+			COLORS.ok));
+		out.push(historyNote(interval));
+		out.push(footer(st));
+		return out;
+	}
+
+	/* Poller stoi, gdy karta przegladarki jest niewidoczna, wiec przerwy sa
+	   normalne. Trzy interwaly to prog "to juz nie jest ciagly pomiar";
+	   dolne 30 s chroni przed rwaniem linii przy interwale 5 s. */
+	var gapLimit = Math.max(3 * interval, 30);
+
+	var span = samples[samples.length - 1].t - samples[0].t;
+
+	out.push(E('div', { 'style': 'font-size:.85em;opacity:.7;margin-bottom:.8em' },
+		_('Próbek') + ': ' + samples.length + '  ·  ' + _('zakres') + ': ' + spanText(span) +
+		'  ·  ' + _('interwał') + ': ' + interval + ' s'));
+
+	var blocks = [
+		chartBlock('LTE',    LTE_SERIES, samples, gapLimit),
+		chartBlock('5G NR',  NR_SERIES,  samples, gapLimit)
+	].filter(function(b) { return b !== null; });
+
+	if (!blocks.length)
+		out.push(banner(_('Brak danych o sygnale — modem nie zwrócił żadnej metryki.'),
+			COLORS.ok));
+	else
+		blocks.forEach(function(b) { out.push(b); });
+
+	out.push(historyNote(interval));
+	out.push(footer(st));
+
+	return out;
+}
+
+function historyNote(interval) {
+	return E('div', { 'style': 'font-size:.8em;opacity:.55;margin-top:1em' }, [
+		E('div', {}, _('Historia żyje w pamięci przeglądarki: mieści %d próbek (~%s przy interwale %d s) ' +
+		               'i zaczyna się od zera po przeładowaniu strony. Nic nie jest zapisywane na routerze.')
+			.format(MAX_SAMPLES, spanText(MAX_SAMPLES * interval), interval)),
+		E('div', {}, _('Skala pionowa jest ta sama, co u pasków na zakładce Status — wartości poza ' +
+		                'zakresem są przycinane do krawędzi. Przerwa w linii to odczyt, którego nie ' +
+		                'było: modem nie odpowiedział albo przeglądarka wstrzymała odświeżanie ' +
+		                'na nieaktywnej karcie.'))
+	]);
+}
+
 return view.extend({
 	load: function() {
 		return Promise.all([
@@ -862,9 +1228,14 @@ return view.extend({
 		var st = data[1] || {};
 		var interval = parseInt(uci.get('zte-modem', 'main', 'refresh_interval')) || 10;
 
-		/* Kazda zakladka ma wlasny panel; poller podmienia oba naraz z jednego odczytu. */
+		sample(st);
+
+		/* Kazda zakladka ma wlasny panel; poller podmienia wszystkie naraz
+		   z jednego odczytu. Historia zbiera sie niezaleznie od tego, ktora
+		   zakladka jest na wierzchu - poller jest jeden, wspolny dla strony. */
 		var panels = {
 			status:   E('div', {}, renderStatus(st)),
+			chart:    E('div', {}, renderHistory(st, interval)),
 			device:   E('div', {}, renderDevice(st))
 		};
 
@@ -881,7 +1252,9 @@ return view.extend({
 		poll.add(function() {
 			return callStatus().then(function(res) {
 				res = res || {};
+				sample(res);
 				swap('status',   renderStatus(res));
+				swap('chart',    renderHistory(res, interval));
 				swap('device',   renderDevice(res));
 			}).catch(function() { /* chwilowy blad rpc - nastepny poll sprobuje ponownie */ });
 		}, interval);
@@ -912,10 +1285,15 @@ return view.extend({
 		/* --- zakladka 1: Status ------------------------------------------- */
 		m.section(panelTab('status', _('Status')), 'main', 'status');
 
-		/* --- zakladka 2: Modem ------------------------------------------- */
+		/* --- zakladka 2: Wykresy ------------------------------------------ */
+		/* Zaraz po Statusie, bo to ta sama rzecz w czasie - te same metryki
+		   i te same progi, tylko historia zamiast chwili. */
+		m.section(panelTab('chart', _('Wykresy')), 'main', 'chart');
+
+		/* --- zakladka 3: Modem -------------------------------------------- */
 		m.section(panelTab('device', _('Modem')), 'main', 'device');
 
-		/* --- zakladka 3: Konfiguracja ------------------------------------- */
+		/* --- zakladka 4: Konfiguracja ------------------------------------- */
 		var s = m.section(form.NamedSection, 'main', 'zte-modem', _('Konfiguracja'));
 
 		/* Tytul sekcji jest juz etykieta zakladki - nie powtarzaj go w <h3>. */

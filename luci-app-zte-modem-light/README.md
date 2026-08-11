@@ -4,14 +4,16 @@ Widok LuCI pokazujący na żywo parametry modemu ZTE stanowiącego łącze WAN r
 Backend dostarcza pakiet [`zte-modem-core`](../zte-modem-core/) — ten pakiet to **sam
 interfejs**.
 
-> **Zakres jest zamknięty.** Trzy zakładki, tylko odczyt, **zero zapisu do pamięci
-> trwałej**. Liczniki transferu, statystyki, historia sygnału i wykresy należą do
-> [`luci-app-zte-modem`](../luci-app-zte-modem/) — tutaj świadomie ich nie ma, żeby nie
-> wciągać modułu w zapis do flasha.
+> **Tylko odczyt, zero zapisu do pamięci trwałej.** To jest niezmiennik tego pakietu,
+> a nie lista funkcji: wszystko, co wymagałoby pisania po flashu — liczniki transferu,
+> statystyki, **trwała** historia sygnału — należy do
+> [`luci-app-zte-modem`](../luci-app-zte-modem/). Wykresy na zakładce niżej mieszczą się
+> tutaj, bo ich bufor żyje w pamięci przeglądarki i na routerze nie zostaje po nich ślad.
 
 | zakładka | zawartość |
 |---|---|
 | **Status** | RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, komórki sąsiednie, identyfikacja stacji bazowej |
+| **Wykresy** | te same metryki w czasie, osobno LTE i 5G NR — w ramach sesji przeglądarki |
 | **Modem** | model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
 | **Konfiguracja** | adres modemu, hasło, interwał, test logowania |
 
@@ -19,6 +21,9 @@ interfejs**.
 > teoretycznym) została stąd usunięta — trafi do wersji pełnej. Kod jest w historii gita,
 > w commicie `fbde1c1`; backend nadal pobiera `monthly_*` i `realtime_*`, bo
 > [`zte-modem-core`](../zte-modem-core/) jest wspólny dla obu wersji.
+
+Zakładki idą w kolejności **Status → Wykresy → Modem → Konfiguracja**: wykres to ta sama
+rzecz, co paski wyżej, tylko w czasie, więc stoi obok nich, a nie za tożsamością modemu.
 
 Instalacja i wymagania — patrz [README repozytorium](../README.md).
 Hasło ustawia się w LuCI: **Services → Modem ZTE → Konfiguracja**.
@@ -68,6 +73,42 @@ z motywu. Warto wiedzieć, że motyw renderuje atrybut `title` jako etykietę **
 (`.cbi-progressbar::before { content: attr(title) }`), więc wartość i ocena jakości
 trafiają właśnie tam, zamiast do osobnego elementu.
 
+## Wykresy — historia w ramach sesji
+
+Bufor (`HISTORY`, `MAX_SAMPLES = 720`, czyli ~2 godz. przy interwale 10 s) żyje
+**wyłącznie w pamięci przeglądarki** — bez `localStorage`, bez czegokolwiek na routerze.
+Stoi w zasięgu **modułu**, nie w `render()`, więc LuCI nie ładuje go drugi raz i przejście
+na inną stronę panelu historii nie gubi; `F5` — owszem, gubi. Tyle znaczy tu „sesja".
+
+Cztery rzeczy warte zapamiętania, bo każda wzięła się z konkretnej pułapki:
+
+**Próbka to odczyt modemu, nie tik pollera.** Core oddaje cache, dopóki jest młodszy niż
+`refresh_interval` (`show_status` w `rpcd/zte-modem`), a przy `_stale` wprost ostatnie
+znane dane — w obu wypadkach `_timestamp` się nie zmienia. Bez odsiewania po nim wykres
+rysowałby odcinek z powtórzonej wartości i **udawał, że modem odpowiada**.
+
+**Oś pozioma idzie po czasie, nie po numerze próbki.** Odczyty gubią się na dwa sposoby:
+modem nie odpowiada albo LuCI wstrzymuje poller, gdy karta przeglądarki jest niewidoczna.
+Przy skali po indeksie obie przerwy zniknęłyby, ściskając wykres i udając ciągłość
+pomiaru. Przerwa dłuższa niż `3 × interwał` **rozrywa linię**.
+
+**Skala pionowa to `TIERS`** — te same progi, co paski wyżej, więc pasy tła czytają się
+jak kolor paska i nie trzeba uczyć się drugiej skali. Konsekwencja: wartości spoza zakresu
+są przycinane do krawędzi, dokładnie jak długość paska w `quality()`.
+
+**SVG powstaje przez `document.createElementNS()`** (helper `S()`), bo `E()` z LuCI woła
+`createElement` — `<svg>` wyszedłby jako `HTMLUnknownElement` i nic by się nie narysowało.
+Linia jest rysowana `currentColor`, więc dziedziczy kolor tekstu motywu i jest czytelna
+tak samo w jasnym, jak i ciemnym; kolor stopnia idzie na kropkę bieżącej wartości, a nazwa
+stopnia stoi obok słowem — jak w tabeli sąsiadów.
+
+Krycie pasów jest **inne dla każdego motywu** (`BAND_OPACITY`): jedna wartość nie obsługuje
+obu, bo to samo kilkanaście procent ginie na białym tle, a na ciemnym zamienia pastel
+w błoto — zmieszany z prawie czarnym po prostu ciemnieje. Motyw rozpoznaje `darkTheme()`
+po **jasności koloru tekstu**, a nie przez `prefers-color-scheme`: część motywów LuCI ma
+własny przełącznik i nie idzie za ustawieniem systemu, więc zapytanie medialne kłamałoby
+właśnie tam, gdzie ciemny wybrano świadomie.
+
 ## Metryka, której model nie zna, nie istnieje
 
 `metric()` zwraca `null` dla pustej wartości, a `block()` odfiltrowuje takie kafelki —
@@ -86,6 +127,21 @@ logread | grep rpcd            # gdy obiekt ubus się nie rejestruje
 
 Pola `_*` w odpowiedzi to metadane modułu, nie modemu: `_host`, `_timestamp`,
 `_authenticated`, `_stale`, `_variant`, `_error`.
+
+## Testy
+
+```sh
+node tests/status.test.js       # z katalogu głównego repozytorium
+```
+
+Bez zależności poza samym `node` — [`tests/harness.js`](../tests/harness.js) podstawia
+atrapę DOM i `E()` z LuCI, a widok ładuje odcinając końcowe `return view.extend(...)`.
+`node` jest potrzebny na maszynie dewelopera, **nie** na routerze.
+
+Pokrycie dotyczy zakładki Wykresy i różnic między modelami z
+[`docs/modele.md`](../docs/modele.md): odsiewanie powtórzonego odczytu, RSSI bez znaku
+na MF297D, 5G bez RSRQ na MC7010, geometria linii, przycięcie do skali, rozrywanie linii
+na przerwie, modem nieosiągalny.
 
 ## Dlaczego poprzednie podejście nie działało
 

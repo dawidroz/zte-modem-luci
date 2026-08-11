@@ -1,12 +1,12 @@
 # Metadane pakietu - wspolne dla .ipk i .apk (czyta je scripts/build-pkg.sh).
 
 PKG_NAME="luci-app-zte-modem-light"
-PKG_VERSION="1.0.0"
+PKG_VERSION="1.1.0"
 PKG_RELEASE="1"
 PKG_SECTION="luci"
 PKG_LICENSE="GPL-2.0-only"
 PKG_URL="https://github.com/rybirek/zte-modem-luci"
-PKG_DESC="Widok LuCI dla modemow ZTE - wersja light (Status, Modem, Konfiguracja)"
+PKG_DESC="Widok LuCI dla modemow ZTE - wersja light (Status, Wykresy, Modem, Konfiguracja)"
 
 PKG_DEPENDS="zte-modem-core luci-base"
 
