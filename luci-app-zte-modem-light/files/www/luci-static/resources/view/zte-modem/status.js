@@ -560,14 +560,16 @@ function neighbours(st) {
 			r.serving ? '—' : (delta !== null ? delta.toFixed(0) + ' dB' : '–')
 		];
 
-		return E('tr', { 'class': 'tr' }, cells.map(function(c, i) {
-			var style = r.serving ? 'font-weight:600' : '';
+		/* Bez pogrubiania wierszy. Znacznik slowny w kolumnie PCI mowi to samo
+		   wprost, a pogrubienie w tabeli, gdzie wyrozniony bywa co drugi wiersz
+		   (komorka obslugujaca ZAWSZE, dominujacy czesto), przestaje cokolwiek
+		   wyrozniac i tylko dokłada gestosci.
 
-			/* Kolorujemy sam odstep, nie caly wiersz: pogrubienie jest juz zajete
-			   przez komorke obslugujaca, a zaklocacz ma rywalizowac o uwage
-			   z nia, nie ja przekrzykiwac. */
-			if (r === dominant && (i === 2 || i === 5))
-				style = 'font-weight:600;color:' + COLORS.poor;
+		   Zostaje kolor, i to na samym odstepie - to jego sie maksymalizuje
+		   obracajac antene, wiec tam ma prowadzic wzrok. */
+		return E('tr', { 'class': 'tr' }, cells.map(function(c, i) {
+			var style = (r === dominant && (i === 2 || i === 5))
+				? 'color:' + COLORS.poor : '';
 
 			return E('td', { 'class': 'td left', 'style': style }, c);
 		}));
@@ -870,7 +872,7 @@ function plmn(st) {
 /* Stan modemu/karty. Mapujemy tylko wartosci potwierdzone empirycznie;
    nieznane pokazujemy SUROWO, zeby nie udawac wiedzy, ktorej nie mam. */
 var MODEM_STATES = {
-	'modem_init_complete': _('gotowa'),
+	'modem_init_complete': _('zarejestrowana'),
 	'modem_sim_undetected': _('brak karty'),
 	'modem_waiting_pin':   _('oczekuje na PIN'),
 	'modem_waiting_puk':   _('oczekuje na PUK'),
