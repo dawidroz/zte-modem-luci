@@ -10,6 +10,11 @@ config zte-modem 'main'
 	option timeout '6'
 	# Wykryty wariant hashowania hasla - ustawiany automatycznie, nie ruszac recznie.
 	option hash_variant ''
+	# Protokol modemu: 'goform' (MC888, MC7010, MF79U, MF297D) albo 'ubus'
+	# (MC7510). Puste = wykryj przy pierwszym odczycie i zapamietaj. Wykrycie
+	# powtarza przycisk "Sprawdz logowanie" na zakladce Konfiguracja, wiec przy
+	# podmianie modemu nie trzeba tego czyscic recznie.
+	option protocol ''
 	# Rozpoznawanie stacji bazowej przez API btsearch.pl (wysyla Cell ID na zewnatrz).
 	# 0 = wylacz, jesli nie chcesz odpytywac zewnetrznego serwisu.
 	option bts_lookup '1'

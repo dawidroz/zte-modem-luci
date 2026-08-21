@@ -5,12 +5,23 @@ Wszystko poniżej sprawdzone na żywo, na fizycznych egzemplarzach.
 
 ## Potwierdzone urządzenia
 
-| model | `model_name` | `wa_inner_version` | `cmd=LD` | wariant logowania |
-|---|---|---|---|---|
-| MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | 64 hex | `sha256_sha256` |
-| MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | 64 hex | `sha256_sha256` |
-| MF79U | `MF79U` | `BD_MF79UV1.0.0B03` | **puste** | `b64_plain` |
-| MF297D | `MF297D` | `BD_TELIASEMF297DMODV1.0.1B03` | 64 hex | `sha256_sha256` |
+| model | `model_name` | `wa_inner_version` | protokół | wyzwanie | wariant logowania |
+|---|---|---|---|---|---|
+| MC888 | `MC888` | `BD_STDMC888V1.0.0B04` | goform | `cmd=LD` 64 hex | `sha256_sha256` |
+| MC7010 | `MC7010` | `PLY_PL_MC7010V1.0.0B03` | goform | `cmd=LD` 64 hex | `sha256_sha256` |
+| MF79U | `MF79U` | `BD_MF79UV1.0.0B03` | goform | `cmd=LD` **puste** | `b64_plain` |
+| MF297D | `MF297D` | `BD_TELIASEMF297DMODV1.0.1B03` | goform | `cmd=LD` 64 hex | `sha256_sha256` |
+| MC7510 | `MC7510` | `BD_STDPLMC7510AV1.0.0B04` | **ubus** | sól 64 hex | `sha256_salt` |
+
+⚠️⚠️⚠️ **MC7510 nie ma API `goform` w ogóle** — `/goform/goform_get_cmd_process` zwraca
+**404**. Jego firmware stoi na OpenWrt i panel rozmawia z urządzeniem po ubus JSON-RPC
+pod `/ubus/`. To nie jest kolejny wariant logowania, a **drugi protokół**: inne
+endpointy, inne nazwy pól, inne typy wartości. Cały opis:
+[`ubus-api.md`](ubus-api.md).
+
+Protokół jest wykrywany po tym, **który endpoint odpowiada**, i zapamiętywany
+w `zte-modem.main.protocol`. Sprzedawany jest jako **G51F** (Orange Polska) — nazwa
+handlowa siedzi w `device_market_name` i tylko ubus ją podaje.
 
 ⚠️⚠️ **Nazwa modelu NIE wyznacza rodziny.** MF297D ma w nazwie „MF", ale zachowuje się
 jak seria MC: `cmd=LD` zwraca 64 znaki hex i loguje się `sha256_sha256`. Podział
@@ -26,19 +37,33 @@ i czyta się bez logowania.
 
 ## Metryki radiowe
 
-| pole | MC888 | MC7010 | MF297D | MF79U |
-|---|---|---|---|---|
-| `lte_rsrp` | ✓ | ✓ | ✓ | ✓ |
-| RSRP/RSRQ **per nośna dodatkowa** | **brak** | **brak** | — | — |
-| `lte_rsrq` | ✓ | ✓ | **puste** | ✓ |
-| `lte_snr` / `lte_rssi` | ✓ | ✓ | **puste** (patrz niżej) | ✓ |
-| `lte_pci` | ✓ | ✓ | **puste** | ✓ |
-| `Z5g_rsrp`, `Z5g_SINR` | ✓ | ✓ | brak 5G | brak 5G |
-| `Z5g_rsrq` | ✓ (`-11`) | **zawsze puste** | brak 5G | brak 5G |
-| `bandwidth` | ✓ (`"15MHz"`) | **zawsze puste** | — | — |
-| pola CA (`lte_ca_*`) | ✓ | ✓ | częściowo | **brak** |
+Nazwy w tabeli są **goformowe**; dla MC7510 kolumna mówi, czy pole trafia do widoku
+po przemapowaniu (patrz [`ubus-api.md`](ubus-api.md)).
 
-**Poziomu sygnału per nośna dodatkowa API nie podaje w ogóle.** Odpytane i puste na MC888
+| pole | MC888 | MC7010 | MF297D | MF79U | MC7510 |
+|---|---|---|---|---|---|
+| `lte_rsrp` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| RSRP/RSRQ **per nośna dodatkowa** | **brak** | **brak** | — | — | **✓ jedyny** |
+| `lte_rsrq` | ✓ | ✓ | **puste** | ✓ | ✓ |
+| `lte_snr` / `lte_rssi` | ✓ | ✓ | **puste** (patrz niżej) | ✓ | ✓ |
+| `lte_pci` | ✓ | ✓ | **puste** | ✓ | ✓ (dziesiętnie) |
+| `Z5g_rsrp`, `Z5g_SINR` | ✓ | ✓ | brak 5G | brak 5G | ✓ |
+| `Z5g_rsrq` | ✓ (`-11`) | **zawsze puste** | brak 5G | brak 5G | ✓ (`-12`) |
+| `Z5g_CELL_ID` | ✓ | ✓ | brak 5G | brak 5G | **wartownik** `268435455` |
+| `bandwidth` | ✓ (`"15MHz"`) | **zawsze puste** | — | — | ✓ (z `lteca`) |
+| pola CA (`lte_ca_*`) | ✓ | ✓ | częściowo | **brak** | ✓ (z `lteca`) |
+| `ngbr_cell_info` (sąsiedzi) | ✓ | ✓ | ✓ | — | **bez poziomów** |
+| IMSI | ✓ | ✓ | ✓ | ✓ | **zaszyfrowane** |
+
+**MC7510 jest jedynym sprawdzonym modemem, który podaje poziom sygnału na nośną
+dodatkową** (`ltecasig`) — dlatego tabela nośnych dostaje na nim dwie kolumny więcej.
+Na modemach goformowych ich nie ma, bo nie ma czego w nich pokazać.
+
+Za to **sąsiedzi wychodzą na MC7510 gorzej**: `lte_neighbor_cell` podaje tylko
+`PCI,EARFCN`, bez RSRP, więc tabela sąsiadów się nie pokazuje. Cała jej wartość to
+kolumna Δ, a tej z dwóch pól nie policzysz.
+
+**Poziomu sygnału per nośna dodatkowa API `goform` nie podaje w ogóle.** Odpytane i puste na MC888
 i MC7010: `lte_multi_ca_scell_sig_info`, `lte_ca_scell_rsrp`, `lte_ca_scell_rsrq`,
 `lte_scell_rsrp`, `scell_rsrp`, `lte_multi_ca_scell_signal_info`. Samo
 `lte_multi_ca_scell_info` ma sześć pól i **żadne nie jest poziomem**. Stąd tabela nośnych

@@ -25,7 +25,7 @@ Wszystkie są w standardowym OpenWrt z LuCI, więc zwykle **nic nie trzeba doins
 | pakiet | do czego |
 |---|---|
 | `curl` | HTTP do modemu, obsługa ciasteczka sesji |
-| `ucode` | base64 przy jednym z wariantów hashowania hasła |
+| `ucode` | base64 przy jednym z wariantów hashowania hasła; **parser JSON-a** dla modemów ubusowych (MC7510) |
 | `jshn` | składanie JSON-a w backendzie (`jshn.sh`) |
 | `jsonfilter` | czytanie odpowiedzi modemu |
 | `rpcd` | rejestracja obiektu ubus |
@@ -120,11 +120,28 @@ chmod 0755 /usr/libexec/rpcd/zte-modem
 
 ```sh
 uci get zte-modem.main.host     # czy to na pewno adres MODEMU, nie routera
-ubus call zte-modem probe       # wymusza logowanie i mówi, który wariant hasha zadziałał
+ubus call zte-modem probe       # rozpoznaje protokół i mówi, co zadziałało
 ```
 
 `probe` zużywa próby logowania — modem blokuje po pięciu nieudanych. Nie puszczaj go
 w pętli.
+
+W odpowiedzi `probe` najpierw patrz na **`protocol`**:
+
+| `protocol` | znaczenie |
+|---|---|
+| `goform` | starsze API (MC888, MC7010, MF79U, MF297D) |
+| `ubus` | JSON-RPC pod `/ubus/` (MC7510, w Orange Polska sprzedawany jako **G51F**) |
+| puste + `reachable: false` | modem nie odpowiedział na **żaden** z dwóch — to nie kwestia hasła, patrz punkt 3 |
+
+⚠️ Gdy modem jest ubusowy, **`cmd=LD` zwraca `404` i tak ma być** — to nie usterka,
+tylko brak starego API. Łatwo tu stracić czas na szukanie piątego wariantu hashowania
+hasła, gdy w rzeczywistości chodzi o inny protokół. Opis:
+[`ubus-api.md`](ubus-api.md).
+
+Protokół jest zapamiętywany w `zte-modem.main.protocol`. Po podmianie modemu na inny
+model wystarczy nacisnąć **Sprawdź logowanie** — sonda wykrywa go od nowa i nadpisuje
+zapamiętaną wartość.
 
 ### 5. Metryki puste i `curl` „jest, ale nie działa"
 

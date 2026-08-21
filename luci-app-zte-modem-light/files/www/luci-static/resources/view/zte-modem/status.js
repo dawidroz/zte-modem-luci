@@ -343,8 +343,30 @@ function pcellPciDec(st) {
 	return isNaN(d) ? null : d;
 }
 
+/* Poziom sygnalu NA NOSNA DODATKOWA - `_scell_sig`, pole skladane przez backend.
+ *
+ * Goform tego nie podaje w ogole (docs/modele.md: odpytane i puste na MC888
+ * i MC7010), MC7510 owszem - stad osobne pole, a nie dodatkowa kolumna
+ * w lte_multi_ca_scell_info.
+ *
+ * Uklad: "RSRP,RSRQ,SINR,RSSI" na nosna, rozdzielone ';', w kolejnosci
+ * SCC1, SCC2, ... Nosnej GLOWNEJ tu nie ma - jej pomiary stoja w lte_rsrp
+ * i spolce, tak jak na kazdym innym modemie.
+ */
+function scellSig(st) {
+	if (!st._scell_sig) return [];
+
+	return String(st._scell_sig).split(';').map(function(part) {
+		var f = part.split(',');
+		if (f.length < 4) return null;
+
+		return { rsrp: num(f[0]), rsrq: num(f[1]), sinr: num(f[2]), rssi: num(f[3]) };
+	});
+}
+
 function carrierRows(st) {
 	var rows = [];
+	var sigs = scellSig(st);
 
 	var pband = bandOf(st), pbw = bwOf(st);
 	if (pband || pbw !== null)
@@ -353,7 +375,12 @@ function carrierRows(st) {
 			band:   pband ? 'B' + pband : '–',
 			bw:     pbw,
 			earfcn: txt(earfcnOf(st)),
-			pci:    (pcellPciDec(st) !== null) ? String(pcellPciDec(st)) : txt(st.lte_pci)
+			pci:    (pcellPciDec(st) !== null) ? String(pcellPciDec(st)) : txt(st.lte_pci),
+			/* Nosna glowna ma wlasne pola - te same, ktore pokazuja paski wyzej.
+			   Wypelniamy je TYLKO wtedy, gdy modem podaje pomiary nosnych
+			   dodatkowych; inaczej dorzucalibysmy kolumny z jednym wierszem
+			   wypelnionym i reszta pusta. */
+			sig:    sigs.length ? { rsrp: num(st.lte_rsrp), sinr: snrOf(st) } : null
 		});
 
 	if (st.lte_multi_ca_scell_info) {
@@ -381,8 +408,12 @@ function carrierRows(st) {
 			    num(f[1]) === pPci && num(f[4]) === pEarfcn)
 				return;
 
+			/* Pomiar dopasowany po NUMERZE SCC z pola, nie po pozycji wiersza:
+			   wyzej odsiewamy nosne zdublowane z glowna, wiec pozycje moga sie
+			   przesunac, a numer SCC nie. */
 			rows.push({ name: 'SCC' + f[0], band: 'B' + f[3], bw: num(f[5]),
-			            earfcn: f[4], pci: f[1] });
+			            earfcn: f[4], pci: f[1],
+			            sig: sigs[num(f[0]) - 1] || null });
 		});
 	} else if (num(st.lte_ca_scell_band)) {
 		/* Uwaga na `num()`: MF297D przy WYLACZONEJ agregacji zwraca
@@ -404,8 +435,17 @@ function carriers(st) {
 	var total = rows.reduce(function(a, r) { return a + (r.bw || 0); }, 0);
 	var rb    = rows.reduce(function(a, r) { return a + rbFor(r.bw); }, 0);
 
+	/* Kolumny z pomiarem doklejamy WARUNKOWO - tylko gdy modem podaje poziom
+	   na nosna (MC7510). Modemy goformowe zostaja przy piecu kolumnach, bo dwie
+	   puste kolumny w kazdym wierszu wygladalyby na usterke odczytu, a nie na
+	   brak wsparcia w firmwarze. */
+	var withSig = rows.some(function(r) { return r.sig != null; });
+
+	var labels = [_('Nośna'), _('Pasmo'), _('Szerokość'), 'EARFCN', 'PCI'];
+	if (withSig) labels = labels.concat(['RSRP', 'SINR']);
+
 	var head = E('tr', { 'class': 'tr table-titles' },
-		[_('Nośna'), _('Pasmo'), _('Szerokość'), 'EARFCN', 'PCI'].map(function(h) {
+		labels.map(function(h) {
 			return E('th', { 'class': 'th left' }, h);
 		}));
 
@@ -413,6 +453,13 @@ function carriers(st) {
 		var cells = [r.name, r.band,
 		             r.bw !== null ? r.bw.toFixed(1) + ' MHz' : '–',
 		             r.earfcn, r.pci];
+
+		if (withSig) {
+			var g = r.sig || {};
+			cells.push(g.rsrp != null ? g.rsrp + ' dBm' : '–');
+			cells.push(g.sinr != null ? g.sinr + ' dB'  : '–');
+		}
+
 		return E('tr', { 'class': 'tr' }, cells.map(function(c) {
 			return E('td', { 'class': 'td left' }, String(c));
 		}));
@@ -976,6 +1023,9 @@ function renderDevice(st) {
 	var blocks = [
 		infoBlock(_('Urządzenie'), [
 			row(_('Model'),             st.model_name),
+			/* MC7510 sprzedawany jest pod nazwa operatora - u Orange Polska jako
+			   "G51F", i to ona jest na obudowie. Goform tego pola nie ma. */
+			row(_('Nazwa handlowa'),    st.device_market_name),
 			row(_('Firmware'),          st.wa_inner_version),
 			row(_('Wersja sprzętowa'),  st.hardware_version),
 			/* Rozne modele wypelniaja rozne pola: MC maja web_version,
@@ -1505,6 +1555,13 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		o = s.option(form.DummyValue, '_protocol', _('Protokół'),
+			_('Wykrywany automatycznie: <code>goform</code> (MC888, MC7010, MF79U, ' +
+			  'MF297D) albo <code>ubus</code> (MC7510).'));
+		o.cfgvalue = function() {
+			return uci.get('zte-modem', 'main', 'protocol') || _('jeszcze nie wykryto');
+		};
+
 		o = s.option(form.DummyValue, '_variant', _('Wariant logowania'),
 			_('Wykrywany automatycznie przy pierwszym udanym logowaniu.'));
 		o.cfgvalue = function() {
@@ -1524,9 +1581,18 @@ return view.extend({
 				return callProbe();
 			}).then(function(res) {
 				res = res || {};
+				/* Wyzwanie nazywa sie inaczej w kazdym protokole: na goformie
+				   `cmd=LD`, na ubusie jednorazowa sol z web_login_info. Backend
+				   oddaje jego dlugosc w tym samym polu, wiec rozni sie tylko
+				   etykieta - inaczej na MC7510 pisaloby "Długość LD" o czyms,
+				   czego to API nie ma. */
+				var challenge = (res.protocol === 'ubus')
+					? _('Długość soli') : _('Długość LD');
+
 				var rows = [
 					[_('Modem osiągalny'), res.reachable ? _('tak') : _('nie')],
-					[_('Długość LD'),      txt(res.ld_length)],
+					[_('Protokół'),        res.protocol ? res.protocol : '–'],
+					[challenge,            txt(res.ld_length)],
 					[_('Logowanie'),       res.success ? _('powiodło się') : _('nie powiodło się')]
 				];
 				if (res.variant) rows.push([_('Działający wariant'), res.variant]);

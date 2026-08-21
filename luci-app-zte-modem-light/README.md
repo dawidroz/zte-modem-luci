@@ -14,7 +14,7 @@ interfejs**.
 |---|---|
 | **Status** | zużycie limitu danych, RSRP/RSRQ/RSSI/SNR dla LTE i 5G NR, tabela nośnych z agregacją, łączna szerokość, sufit teoretyczny, komórki sąsiednie, identyfikacja stacji bazowej |
 | **Wykresy** | te same metryki w czasie, osobno LTE i 5G NR — w ramach sesji przeglądarki |
-| **Modem** | model, firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
+| **Modem** | model (i nazwa handlowa, jeśli modem ją podaje), firmware, IMEI, karta SIM (ICCID, IMSI, PLMN), APN, adresy WAN |
 | **Konfiguracja** | adres modemu, hasło, interwał, test logowania |
 
 > Zakładka **Transfer** (licznik miesięczny i sesji, prędkość chwilowa skalowana sufitem
@@ -24,6 +24,21 @@ interfejs**.
 
 Zakładki idą w kolejności **Status → Wykresy → Modem → Konfiguracja**: wykres to ta sama
 rzecz, co paski wyżej, tylko w czasie, więc stoi obok nich, a nie za tożsamością modemu.
+
+## Co zależy od modelu modemu
+
+Widok nie ma **żadnej listy modeli** — sterują nim same dane, a pola o pustej wartości
+nie renderują się wcale (zamiast pokazywać pusty pasek sugerujący awarię łącza). Dwa
+miejsca zachowują się jednak inaczej w zależności od tego, co modem podaje:
+
+- **tabela nośnych** dostaje kolumny **RSRP** i **SINR** tylko wtedy, gdy backend
+  wystawi `_scell_sig`, czyli na modemach ubusowych (MC7510). Poziomu na nośną dodatkową
+  API `goform` nie podaje w ogóle, a dwie puste kolumny w każdym wierszu wyglądałyby
+  na usterkę odczytu, nie na brak wsparcia w firmwarze;
+- **tabela sąsiadów** wymaga RSRP w `ngbr_cell_info` — na MC7510 modem podaje sąsiadom
+  tylko PCI i EARFCN, więc sekcja się nie pokazuje.
+
+Szczegóły per model: [`docs/modele.md`](../docs/modele.md).
 
 Instalacja i wymagania — patrz [README repozytorium](../README.md).
 Hasło ustawia się w LuCI: **Services → Modem ZTE → Konfiguracja**.

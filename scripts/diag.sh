@@ -61,6 +61,7 @@ echo
 
 echo "--- 5. pliki modulu ---"
 for f in /usr/libexec/rpcd/zte-modem \
+         /usr/share/zte-modem/ubus-map.uc \
          /usr/share/rpcd/acl.d/luci-app-zte-modem.json \
          /usr/share/luci/menu.d/luci-app-zte-modem.json \
          /www/luci-static/resources/view/zte-modem/status.js \
@@ -95,11 +96,22 @@ echo "  (UWAGA: to ma byc adres MODEMU, nie routera)"
 if [ -n "$HOST" ]; then
 	printf '  ping:  '; ping -c2 -W2 "$HOST" >/dev/null 2>&1 && echo "odpowiada" || echo "BRAK ODPOWIEDZI"
 	printf '  HTTP:  '; curl -s -o /dev/null -w '%{http_code}\n' --max-time 6 "http://$HOST/" 2>&1
-	printf '  cmd=LD: '
+	# Pytamy o OBA protokoly, bo od tego zaczyna sie diagnoza: MC7510 nie ma
+	# goformu i oddaje na nim strone 404, co bez tej pary linii wyglada
+	# na uszkodzony modem albo zly adres.
+	printf '  goform (cmd=LD):  '
 	curl -s --max-time 6 -H "Referer: http://$HOST/index.html" \
 		"http://$HOST/goform/goform_get_cmd_process?isTest=false&cmd=LD" 2>/dev/null \
 		| sed 's/"LD":"[0-9A-Fa-f]\{8\}[0-9A-Fa-f]*"/"LD":"[jest, 64 hex]"/' | head -c 120
 	echo
+	printf '  ubus (web_login_info): '
+	curl -s --max-time 6 -H "Referer: http://$HOST/" \
+		-H "Content-Type: application/json" -X POST "http://$HOST/ubus/" \
+		--data '[{"jsonrpc":"2.0","id":1,"method":"call","params":["00000000000000000000000000000000","zwrt_web","web_login_info",{}]}]' \
+		2>/dev/null \
+		| sed 's/"zte_web_sault":"[0-9A-Fa-f]*"/"zte_web_sault":"[jest, 64 hex]"/' | head -c 200
+	echo
+	echo "  (404 na goformie + sol z ubusa = modem ubusowy, np. MC7510 - tak ma byc)"
 fi
 echo
 
@@ -111,7 +123,8 @@ ubus call zte-modem status 2>&1 | sed -E \
 echo
 
 echo "--- 10. sonda logowania ---"
-ubus call zte-modem probe 2>&1 | sed -E 's/("ld"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[ukryte]"/'
+ubus call zte-modem probe 2>&1 | sed -E \
+	-e 's/("(ld|sault|zte_web_sault)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[ukryte]"/g'
 echo
 
 echo "=== koniec raportu ==="

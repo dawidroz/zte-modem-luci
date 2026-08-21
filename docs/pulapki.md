@@ -14,6 +14,29 @@ w odpowiednim dokumencie. Warto przeczytać **przed** dodaniem obsługi kolejneg
 | **`login_lock_time` puste bez `multi_data=1`** | pole niby nie istnieje | [goform-api](goform-api.md#semantyka-pól-logowania) |
 | **`psw_fail_num_str` to pozostałe próby, nie zużyte** | odwrotna interpretacja licznika blokady | [goform-api](goform-api.md#semantyka-pól-logowania) |
 
+## Drugi protokół (ubus, MC7510)
+
+| pułapka | objaw | gdzie |
+|---|---|---|
+| **MC7510 nie ma `goform` w ogóle** | `404` na `/goform/...`; szukanie wariantu hasha zamiast innego protokołu | [ubus-api](ubus-api.md) |
+| **`lte_band` to lista pasm WŁĄCZONYCH, nie pasmo nośnej** | pasmo „B1,3,8,20,38" w tabeli nośnych | [ubus-api](ubus-api.md#-lte_band-to-lista-pasm-włączonych-nie-pasmo-nośnej) |
+| **`ltecasig` opisuje nośne DODATKOWE, nie wszystkie** | poziom SCC1 przypisany nośnej głównej; 3 nośne przy 2 wpisach | [ubus-api](ubus-api.md#ltecasig--poziom-na-nośną-dodatkową) |
+| **`nr5g_cell_id` = `268435455`** | `0xFFFFFFF` (same jedynki) pokazane jako prawdziwy Cell ID 5G | [ubus-api](ubus-api.md#-nr5g_cell_id--268435455-to-nieznane-nie-numer) |
+| **`sim_imsi` i `msisdn` są zaszyfrowane** | blok base64 z podpisem „IMSI" | [ubus-api](ubus-api.md#-sim_imsi-i-msisdn-są-zaszyfrowane) |
+| **`web_api_telus_para_get` przycina IPv6 do 31 znaków** | ucięty adres, który wygląda na prawdziwy | [ubus-api](ubus-api.md#-web_api_telus_para_get-przycina-adresy-ipv6-do-31-znaków) |
+| **W trybie bridge `ipv4_address` to `"0"`, nie pustka** | adres WAN „0"; `rssi`/`rscp` = 0 udające pomiar 0 dBm | [ubus-api](ubus-api.md#-w-trybie-bridge-ipv4_address-to-0-nie-pustka) |
+| **Typy JSON-a są mieszane i niekonsekwentne** | `st.pin_status === '0'` przestaje trafiać, bo modem dał liczbę | [ubus-api](ubus-api.md#-typy-są-mieszane--wszystko-schodzi-do-łańcuchów) |
+| **Sąsiedzi bez poziomów** | tabela sąsiadów pusta; „prawie" gorsze niż nic | [ubus-api](ubus-api.md#komórki-sąsiednie-tylko-pci-i-earfcn) |
+
+### ucode i shell
+
+| pułapka | objaw | gdzie |
+|---|---|---|
+| **`map(arr, trim)`** | ucode woła z 3 argumentami, `trim` bierze indeks za zestaw znaków → cała lista `[null, null, …]`, modem wygląda na taki bez agregacji | [ubus-api](ubus-api.md#-pułapki-samego-ucode) |
+| **`v === undefined` w ucode** | `undefined` nie istnieje → **błąd wykonania**, i to opóźniony: na pustych danych warunek zwiera się wcześniej, wywala dopiero na prawdziwych | [ubus-api](ubus-api.md#-pułapki-samego-ucode) |
+| **`json()` rzuca, nie zwraca `null`** | urwana odpowiedź modemu wywala mapper zamiast dać pusty wynik | [ubus-api](ubus-api.md#-pułapki-samego-ucode) |
+| **`${4:-\{\}}` w shellu** | backslash zostaje dosłownie, modem dostaje zepsuty JSON i „nie odpowiada" | [ubus-api](ubus-api.md#-pułapki-samego-ucode) |
+
 ## Kodowanie wartości
 
 | pułapka | objaw | gdzie |
@@ -25,6 +48,7 @@ w odpowiednim dokumencie. Warto przeczytać **przed** dodaniem obsługi kolejneg
 | **`wan_active_band` kłamie** | „LTE BAND 1" przy EARFCN z B3 i B28 | [kodowanie-pol](kodowanie-pol.md#wan_active_band-potrafi-kłamać) |
 | **`enodeb_id` bywa kopią `cell_id`** | numer komórki udaje numer stacji | [kodowanie-pol](kodowanie-pol.md#enodeb-liczymy-sami) |
 | **`cell_id` niepełny przed rejestracją** | krótka wartość, heurystyka wybiera hex | [kodowanie-pol](kodowanie-pol.md#cell_id--_cell_base) |
+| **Na ubusie identyfikatory są DZIESIĘTNE** | heurystyki hex/dec są tam zbędne — backend ustawia `dec` wprost, bo dla małych wartości zakres nie rozstrzyga | [ubus-api](ubus-api.md#-identyfikatory-są-dziesiętne) |
 
 ## Pola i modele
 
@@ -65,6 +89,10 @@ czwartą:
    zachowanie, nie nazwa.
 3. **„Hasło ZTE koduje się base64 przed hashem"** — najczęstszy opis w sieci, a na
    sprawdzonych firmware'ach nieprawdziwy.
+4. **„Każdy modem ZTE gada po `goform`"** — MC7510 obala. Na starym endpoincie oddaje
+   `404`, bo jego firmware stoi na OpenWrt i panel rozmawia po ubusie. Objaw („nie
+   loguje się") wygląda dokładnie jak nieznany wariant hasha, więc łatwo szukać
+   piątego wariantu zamiast drugiego protokołu.
 
 Wspólny mianownik: **opis z internetu i cudzy kod zawodziły, empiria na fizycznym
 urządzeniu nie.** Stąd nacisk na tabele „sprawdzone na żywo" zamiast na dokumentację.

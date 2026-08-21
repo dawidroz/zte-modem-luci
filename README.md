@@ -1,8 +1,20 @@
 # zte — monitoring modemów ZTE w LuCI
 
-Pakiety dla OpenWrt, które czytają parametry modemu ZTE **po HTTP przez API `goform`** —
-bez `comgt`/AT, bez `/dev/ttyUSB*`. Dla modemów sieciowych (CPE po Ethernecie)
-stanowiących łącze WAN routera.
+Pakiety dla OpenWrt, które czytają parametry modemu ZTE **po HTTP** — bez `comgt`/AT,
+bez `/dev/ttyUSB*`. Dla modemów sieciowych (CPE po Ethernecie) stanowiących łącze WAN
+routera.
+
+Obsługiwane są **dwa protokoły**, wykrywane automatycznie:
+
+| protokół | modemy | endpoint |
+|---|---|---|
+| [`goform`](docs/goform-api.md) | MC888, MC7010, MF79U, MF297D | `/goform/goform_get_cmd_process` |
+| [`ubus`](docs/ubus-api.md) | MC7510 (Orange PL: **G51F**) | `/ubus/` (JSON-RPC) |
+
+MC7510 nie ma API `goform` w ogóle — na starym endpoincie oddaje **404**. Jego firmware
+stoi na OpenWrt, więc panel rozmawia z nim po ubusie, innymi nazwami pól. Backend
+tłumaczy je na nazwy goformowe, dzięki czemu widok, cache i rozpoznawanie stacji bazowej
+są dla obu protokołów **te same**.
 
 To dlatego, że `modemdata` / `modemband` / `sms-tool` z feedu eko.one.pl **nie mają tu
 zastosowania**: zależą od `comgt`/AT i wymagają `/dev/ttyUSB*` albo `/dev/cdc-wdm*`,
@@ -15,8 +27,8 @@ których przy CPE po Ethernecie po prostu nie ma.
 | [`zte-modem-core/`](zte-modem-core/) | **backend** — obiekt ubus `zte-modem`, bez interfejsu |
 | [`luci-app-zte-modem-light/`](luci-app-zte-modem-light/) | **widok, wersja light** — 4 zakładki (Status, Wykresy, Modem, Konfiguracja), tylko odczyt, zero zapisu do flasha |
 | [`luci-app-zte-modem/`](luci-app-zte-modem/) | **wersja rozbudowana** — transfer i trwała historia sygnału, *planowana* |
-| [`docs/`](docs/) | dokumentacja protokołu, wspólna dla obu wersji |
-| [`tests/`](tests/) | testy widoku w `node` (`node tests/status.test.js`), bez zależności |
+| [`docs/`](docs/) | dokumentacja protokołów, wspólna dla obu wersji |
+| [`tests/`](tests/) | testy widoku w `node` i testy mappera w `ucode`, bez zależności z npm |
 
 Widoki dzielą całą logikę odczytu, dlatego backend jest osobnym pakietem — a nie
 kopiowany. Obie wersje używają tych samych identyfikatorów runtime
@@ -39,6 +51,18 @@ ustawia się je w LuCI (**Services → Modem ZTE → Konfiguracja**).
 
 Zakres modułów to **tylko odczyt**: żadnego restartu, SMS-ów ani blokowania pasm. Dzięki
 temu niepotrzebny jest nagłówek `AD` i nie da się przez pomyłkę odciąć routera od sieci.
+
+## Testy
+
+```sh
+node tests/status.test.js                        # widok: wykresy, limit transferu
+node tests/mc7510.test.js                        # widok: tabela nośnych, MC7510
+sh   tests/ubus-map.test.sh --ssh root@<router>  # mapper ubus -> goform
+```
+
+Test mappera potrzebuje `ucode` i `jsonfilter`, więc na maszynie deweloperskiej odpala
+się go na routerze przez `--ssh`. Próbki we wszystkich trzech plikach są zdjęte z żywych
+urządzeń.
 
 ## Instalujesz u siebie?
 

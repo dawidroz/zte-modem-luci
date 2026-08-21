@@ -1,11 +1,24 @@
 #!/bin/sh
 #
-# Backend rpcd dla monitoringu modemow ZTE (MC888, MC7010, ...).
-# Rozmawia z modemem po HTTP (goform), zwraca JSON dla widoku LuCI.
+# Backend rpcd dla monitoringu modemow ZTE (MC888, MC7010, MC7510, ...).
+# Rozmawia z modemem po HTTP, zwraca JSON dla widoku LuCI.
+#
+# DWA PROTOKOLY, jedno wyjscie:
+#
+#   goform - starsze API ZTE (/goform/goform_get_cmd_process), MC888, MC7010,
+#            MF79U, MF297D;
+#   ubus   - JSON-RPC pod /ubus/ na firmware zbudowanym na OpenWrt, MC7510.
+#            Nazwy pol sa tam INNE, wiec odpowiedz przechodzi przez mapper
+#            /usr/share/zte-modem/ubus-map.uc, ktory tlumaczy je na nazwy
+#            goformowe. Dalej (cache, btsearch, widok) roznicy juz nie ma.
+#
+# Protokolu NIE zgadujemy z nazwy modelu - rozstrzyga, ktory endpoint odpowiada
+# (patrz _detect_proto). Wynik ladunie w uci, zeby nie sprawdzac za kazdym razem.
 #
 # Zalozenia:
 #  - tylko odczyt, zadnych operacji zapisu na modemie
-#  - cookie sesji jest REUZYWANE (modem dopuszcza jedna sesje admina naraz)
+#  - sesja jest REUZYWANA (modem dopuszcza jedna sesje admina naraz):
+#    na goformie cookie, na ubusie token ubus_rpc_session
 #  - odpowiedz jest cache'owana, zeby N otwartych kart LuCI = 1 zapytanie do modemu
 #
 
@@ -13,8 +26,15 @@
 
 CACHE="/tmp/zte-modem.json"
 COOKIE="/tmp/zte-modem.cookie"
+STOK="/tmp/zte-modem.stok"
 LOCK="/tmp/zte-modem.lock"
 BTS_CACHE="/tmp/zte-modem.bts"
+
+# Mapper nazw pol dla protokolu ubus.
+UBUS_MAP="/usr/share/zte-modem/ubus-map.uc"
+
+# Sesja, ktorej jeszcze nie mamy. ubus wymaga tu 32 zer, nie pustego lancucha.
+NULL_STOK="00000000000000000000000000000000"
 
 BTS_API="https://btsearch.pl/api/v1/search"
 BTS_LOOKUP="$(uci -q get zte-modem.main.bts_lookup)"; [ -n "$BTS_LOOKUP" ] || BTS_LOOKUP=1
@@ -24,6 +44,8 @@ PASSWORD="$(uci -q get zte-modem.main.password)"
 INTERVAL="$(uci -q get zte-modem.main.refresh_interval)"; [ -n "$INTERVAL" ] || INTERVAL=10
 TIMEOUT="$(uci -q get zte-modem.main.timeout)";           [ -n "$TIMEOUT" ] || TIMEOUT=6
 VARIANT="$(uci -q get zte-modem.main.hash_variant)"
+# Protokol modemu: goform | ubus | puste = wykryj i zapamietaj.
+PROTO="$(uci -q get zte-modem.main.protocol)"
 
 REFERER="http://${HOST}/index.html"
 
@@ -104,6 +126,182 @@ _hash() { # $1=wariant $2=haslo $3=LD
 		b64_plain)     _b64 "$2" ;;
 		md5_plain)     _md5_lo "${2}${3}" ;;
 	esac
+}
+
+#
+# --- transport ubus (MC7510 i pokrewne) ------------------------------------
+#
+# JSON-RPC pod http://HOST/ubus/. Ksztalt wywolania:
+#
+#   [{"jsonrpc":"2.0","id":1,"method":"call",
+#     "params":["<sesja>","<modul>","<metoda>",{<argumenty>}]}]
+#
+# a odpowiedzi:
+#
+#   [{"jsonrpc":"2.0","id":1,"result":[0,{<dane>}]}]          # sukces
+#   [{"jsonrpc":"2.0","id":1,"error":{"code":-32002,...}}]    # brak sesji
+#
+# Zero w `result[0]` to status ubusa, dane siedza w `result[1]`.
+
+_ub_post() { # $1 = tresc tablicy JSON-RPC
+	curl -s --max-time "$TIMEOUT" \
+		-H "Referer: http://${HOST}/" \
+		-H "Content-Type: application/json" \
+		-X POST "http://${HOST}/ubus/" \
+		--data "$1" 2>/dev/null
+}
+
+_ub_call() { # $1=sesja $2=modul $3=metoda $4=argumenty JSON (domyslnie {})
+	# Domyslne '{}' przez zmienna, a NIE przez ${4:-...}: w podstawieniu wewnatrz
+	# cudzyslowow backslash przed nawiasem klamrowym zostaje w wyniku doslownie
+	# ("\{\}"), czyli modem dostaje zepsuty JSON i odpowiada bledem.
+	local args="$4"
+	[ -n "$args" ] || args='{}'
+
+	_ub_post "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$1\",\"$2\",\"$3\",$args]}]"
+}
+
+# Nazwy kluczy koperty, ktora dostaje mapper - W TEJ SAMEJ KOLEJNOSCI, co
+# wywolania w _ub_batch. Mapper dopasowuje je po polu `id` odpowiedzi.
+UBUS_KEYS="nwinfo,device,common,sim,iface,traffic,limit,apn,web"
+
+# Wszystkie odczyty w JEDNYM zapytaniu HTTP.
+#
+# ubus przyjmuje TABLICE wywolan w jednym POST-cie - to odpowiednik goformowego
+# multi_data=1. Sprawdzone na MC7510: dziewiec metod, jedna odpowiedz.
+# Bez tego kazde odswiezenie to dziewiec round-tripow do modemu.
+_ub_batch() { # $1 = sesja
+	_ub_post "[
+{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"$1\",\"zte_nwinfo_api\",\"nwinfo_get_netinfo\",{}]},
+{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_web\",\"device_info\",{}]},
+{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_zte_mdm.api\",\"get_zwrt_common_info\",{}]},
+{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_zte_mdm.api\",\"get_sim_info\",{}]},
+{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_data\",\"get_wwaniface\",{\"source_module\":\"web\",\"cid\":1}]},
+{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_data\",\"get_wwandst\",{\"source_module\":\"web\",\"cid\":1,\"type\":4}]},
+{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_data\",\"get_wwandst_monthlimit\",{\"source_module\":\"web\",\"cid\":1}]},
+{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_apn_object\",\"getCidApnList\",{\"cid\":1}]},
+{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"call\",\"params\":[\"$1\",\"zwrt_web\",\"web_info\",{}]}
+]"
+}
+
+# Czy odpowiedz na paczke niesie dane, czy tylko "Access denied"?
+#
+# Sprawdzamy OBECNOSC obiektu result[1] pierwszego wywolania, a nie konkretnego
+# pola: modem bez karty SIM oddaje nwinfo z mniejsza liczba pol, ale nadal
+# oddaje obiekt. Brak `result` = brak sesji.
+_ub_ok() { # $1 = odpowiedz
+	[ -n "$(printf '%s' "$1" | jsonfilter -q -e '@[0].result[1]')" ]
+}
+
+# Logowanie: SHA256(SHA256(haslo) + sol), wszystko WIELKIMI literami hex.
+#
+# Sol (`zte_web_sault`, tak w oryginale) jest jednorazowa i przychodzi
+# z web_login_info, ktory dziala BEZ sesji. To ten sam pomysl, co goformowe
+# `cmd=LD`, tylko inna funkcja skrotu i inne opakowanie.
+_ub_login() {
+	local salt h1 h2 tok
+	[ -n "$PASSWORD" ] || return 1
+
+	rm -f "$STOK"
+
+	salt="$(_ub_call "$NULL_STOK" zwrt_web web_login_info | \
+		jsonfilter -q -e '@[0].result[1].zte_web_sault')"
+	[ -n "$salt" ] || return 1
+
+	h1="$(_sha_up "$PASSWORD")"
+	h2="$(_sha_up "${h1}${salt}")"
+
+	tok="$(_ub_call "$NULL_STOK" zwrt_web web_login "{\"password\":\"$h2\"}" | \
+		jsonfilter -q -e '@[0].result[1].ubus_rpc_session')"
+	[ -n "$tok" ] || return 1
+
+	# Token daje pelny dostep do modemu - trzymamy go tak samo ciasno jak haslo.
+	touch "$STOK" && chmod 600 "$STOK"
+	printf '%s' "$tok" > "$STOK"
+
+	# Zapisujemy wariant pod ta sama nazwa, co goformowe - to nadal jest sposob
+	# hashowania hasla, a zakladka "Konfiguracja" czyta wlasnie to pole.
+	if [ "$VARIANT" != "sha256_salt" ]; then
+		uci -q set zte-modem.main.hash_variant="sha256_salt"
+		uci -q commit zte-modem
+	fi
+
+	return 0
+}
+
+# Dane w konwencji goformu. Puste wyjscie = nie udalo sie.
+#
+# Najpierw probujemy zapamietanym tokenem i BEZ dodatkowego zapytania
+# sprawdzajacego - jesli sesja zyje, jedno HTTP wystarcza na cale odswiezenie.
+# Dopiero odmowa dostepu uruchamia logowanie. Modem trzyma sesje ~10 min
+# bezczynnosci (login_timeout_lefttime), a domyslny interwal to 10 s, wiec
+# w praktyce logujemy sie raz.
+_ub_data() {
+	local tok resp
+
+	tok="$(cat "$STOK" 2>/dev/null)"
+
+	if [ -n "$tok" ]; then
+		resp="$(_ub_batch "$tok")"
+		if _ub_ok "$resp"; then
+			printf '%s' "$resp" | ZTE_UBUS_KEYS="$UBUS_KEYS" ucode -R "$UBUS_MAP"
+			return 0
+		fi
+	fi
+
+	_ub_login || return 1
+
+	tok="$(cat "$STOK" 2>/dev/null)"
+	resp="$(_ub_batch "$tok")"
+	_ub_ok "$resp" || return 1
+
+	printf '%s' "$resp" | ZTE_UBUS_KEYS="$UBUS_KEYS" ucode -R "$UBUS_MAP"
+}
+
+#
+# --- wybor protokolu -------------------------------------------------------
+#
+
+# Czy odpowiada endpoint goformu?
+#
+# NIE wymagamy niepustego LD: MF79U zwraca puste (docs/modele.md), a i tak jest
+# modemem goformowym. Wystarczy, ze endpoint oddaje JSON - MC7510 na tym adresie
+# oddaje strone 404 w HTML-u, wiec te dwa przypadki rozroznia sie pewnie.
+_gf_probe() {
+	case "$(_get "isTest=false&cmd=LD")" in
+		'{'*) return 0 ;;
+	esac
+	return 1
+}
+
+# Czy odpowiada endpoint ubusa? Rozpoznajemy po soli w web_login_info -
+# to zadanie jest oddawane bez sesji, wiec test nie wymaga hasla.
+_ub_probe() {
+	[ -n "$(_ub_call "$NULL_STOK" zwrt_web web_login_info | \
+		jsonfilter -q -e '@[0].result[1].zte_web_sault')" ]
+}
+
+# Wykrycie protokolu. Puste wyjscie = modem nie odpowiedzial na zaden z dwoch,
+# czyli jest nieosiagalny - i wtedy WYNIKU NIE ZAPAMIETUJEMY, zeby chwilowy brak
+# lacznosci nie zabetonowal w uci blednego protokolu.
+_detect_proto() {
+	_ub_probe && { echo ubus;   return 0; }
+	_gf_probe && { echo goform; return 0; }
+	return 1
+}
+
+_proto() {
+	local p
+
+	case "$PROTO" in
+		goform|ubus) echo "$PROTO"; return 0 ;;
+	esac
+
+	p="$(_detect_proto)" || return 1
+
+	uci -q set zte-modem.main.protocol="$p"
+	uci -q commit zte-modem
+	echo "$p"
 }
 
 # Czy mamy wazna sesje?
@@ -293,31 +491,55 @@ _bts_fetch() { # $1 = ecid dziesietnie, $2 = plik cache
 #
 
 _refresh() {
-	local data variant authed=0 err="" now
+	local data variant authed=0 err="" now proto msg
 
 	now="$(date +%s)"
 
+	proto="$(_proto)" || proto=""
+
 	if [ -z "$PASSWORD" ]; then
 		err="Nie ustawiono hasla do modemu"
+	elif [ -z "$proto" ]; then
+		err="Modem nieosiagalny pod ${HOST}"
+	elif [ "$proto" = "ubus" ]; then
+		# Na ubusie BEZ sesji nie ma nic - kazda metoda odpowiada "Access
+		# denied", wiec pobranie danych i logowanie to jedna operacja.
+		data="$(_ub_data)"
+		if [ -n "$data" ]; then
+			authed=1
+			variant="sha256_salt"
+		else
+			err="Logowanie do modemu nie powiodlo sie (sprawdz haslo)"
+		fi
 	else
 		variant="$(_ensure_session)" && authed=1
 		[ "$authed" -eq 1 ] || err="Logowanie do modemu nie powiodlo sie (sprawdz haslo)"
 	fi
 
-	data="$(_get "isTest=false&multi_data=1&cmd=${FIELDS}")"
+	# Na goformie czesc pol jest czytelna takze bez sesji, wiec pytamy zawsze -
+	# nawet gdy logowanie sie nie udalo, cos jeszcze zobaczymy.
+	[ "$proto" = "goform" ] && data="$(_get "isTest=false&multi_data=1&cmd=${FIELDS}")"
 
 	if [ -z "$data" ]; then
+		# Brak danych ma na ubusie DWIE przyczyny - modem nie odpowiada albo
+		# odmowil logowania - i rozroznienie jest tu cala trescia komunikatu:
+		# "sprawdz haslo" kieruje gdzie indziej niz "sprawdz kabel". Na goformie
+		# odczyty przychodza takze bez sesji, wiec pusto znaczy tam brak
+		# lacznosci i zostajemy przy komunikacie o nieosiagalnosci.
+		msg="Modem nieosiagalny pod ${HOST}"
+		[ "$proto" = "ubus" ] && [ -n "$err" ] && msg="$err"
+
 		# Modem nieosiagalny - oddaj ostatnie znane dane, ale oznacz blad.
 		if [ -s "$CACHE" ]; then
 			json_init
 			json_load_file "$CACHE" 2>/dev/null
 			json_add_boolean "_stale" 1
-			json_add_string  "_error" "Modem nieosiagalny pod ${HOST}"
+			json_add_string  "_error" "$msg"
 			json_dump
 			return
 		fi
 		json_init
-		json_add_string  "_error" "Modem nieosiagalny pod ${HOST}"
+		json_add_string  "_error" "$msg"
 		json_add_string  "_host" "$HOST"
 		json_add_int     "_timestamp" "$now"
 		json_add_boolean "_authenticated" 0
@@ -333,8 +555,20 @@ _refresh() {
 	cid="$(printf '%s'   "$data" | jsonfilter -q -e '@.cell_id')"
 	pciv="$(printf '%s'  "$data" | jsonfilter -q -e '@.lte_pci')"
 	model="$(printf '%s' "$data" | jsonfilter -q -e '@.model_name')"
-	pcibase="$(_pci_base "$pciv" "$model")"
-	cellbase="$(_cell_base "$cid")"
+	# Na ubusie kodowanie jest ZNANE, nie wnioskowane: MC7510 podaje
+	# identyfikatory dziesietnie. Potwierdzone trojako - cell_id 35072027
+	# jako hex daloby 889438247, czyli poza 28-bitowe ECI; lte_pci 259 jako hex
+	# to 601, poza zakres PCI 0-503; a PCI wewnatrz `lteca` jest dziesietne
+	# i rowne lte_pci. Heurystyki z zakresu daja tu ten sam wynik, ale
+	# przestaja dzialac dla malych wartosci (PCI "100" jest poprawne w obu
+	# systemach), wiec skoro wiemy, to nie zgadujemy.
+	if [ "$proto" = "ubus" ]; then
+		pcibase="dec"
+		cellbase="dec"
+	else
+		pcibase="$(_pci_base "$pciv" "$model")"
+		cellbase="$(_cell_base "$cid")"
+	fi
 
 	# btsearch szuka po ECI dziesietnym - konwertujemy wg wykrytego kodowania.
 	if [ "$BTS_LOOKUP" = "1" ] && [ -n "$cid" ]; then
@@ -364,6 +598,7 @@ _refresh() {
 	json_add_boolean "_authenticated" "$authed"
 	json_add_boolean "_stale" 0
 	json_add_string  "_variant" "${variant:-}"
+	json_add_string  "_protocol" "${proto:-}"
 	json_add_string  "_pci_base"  "$pcibase"
 	json_add_string  "_cell_base" "$cellbase"
 	[ -n "$dec" ]          && json_add_string "_cell_dec"     "$dec"
@@ -416,17 +651,38 @@ show_status() {
 	} 9>"$LOCK"
 }
 
-# Diagnostyka: wymusza logowanie i mowi, ktory wariant hashowania zadzialal.
+# Diagnostyka: rozpoznaje protokol, wymusza logowanie i mowi, co zadzialalo.
+#
+# Wykrycie protokolu jest tu ZAPAMIETYWANE na nowo, bez ogladania sie na
+# poprzedni wynik: to jedyne miejsce, w ktorym uzytkownik prosi wprost
+# o sprawdzenie lacznosci, a modem pod tym adresem mogl sie zmienic.
 show_probe() {
-	local v ld ok=""
+	local v ld ok="" proto
 
 	json_init
 	json_add_string "host" "$HOST"
 
-	ld="$(_get "isTest=false&cmd=LD" | jsonfilter -q -e '@.LD' 2>/dev/null)"
+	proto="$(_detect_proto)" || proto=""
+	if [ -n "$proto" ]; then
+		uci -q set zte-modem.main.protocol="$proto"
+		uci -q commit zte-modem
+	fi
+
+	json_add_string  "protocol" "${proto:-}"
+	json_add_boolean "reachable" "$([ -n "$proto" ] && echo 1 || echo 0)"
+
+	# Wyzwanie z modemu. Na goformie to `cmd=LD`, na ubusie jednorazowa sol
+	# z web_login_info - rozna nazwa, ta sama rola, wiec ta sama para pol
+	# w wyniku (widok pokazuje dlugosc pod etykieta zalezna od protokolu).
+	if [ "$proto" = "ubus" ]; then
+		ld="$(_ub_call "$NULL_STOK" zwrt_web web_login_info | \
+			jsonfilter -q -e '@[0].result[1].zte_web_sault')"
+	elif [ "$proto" = "goform" ]; then
+		ld="$(_get "isTest=false&cmd=LD" | jsonfilter -q -e '@.LD' 2>/dev/null)"
+	fi
+
 	json_add_string "ld" "${ld:-}"
 	json_add_int    "ld_length" "${#ld}"
-	json_add_boolean "reachable" "$([ -n "$ld" ] && echo 1 || echo 0)"
 
 	if [ -z "$PASSWORD" ]; then
 		json_add_string "error" "Nie ustawiono hasla do modemu"
@@ -434,22 +690,40 @@ show_probe() {
 		return
 	fi
 
-	json_add_array "tried"
-	for v in $VARIANTS; do
-		json_add_string "" "$v"
-	done
-	json_close_array
+	if [ -z "$proto" ]; then
+		json_add_boolean "success" 0
+		json_add_string  "error" "Modem nieosiagalny pod ${HOST}"
+		json_dump
+		return
+	fi
 
-	for v in $VARIANTS; do
-		if _login "$v"; then
-			ok="$v"
-			break
-		fi
-	done
+	if [ "$proto" = "ubus" ]; then
+		# Na ubusie jest jeden sposob: SHA256(SHA256(haslo) + sol).
+		json_add_array "tried"
+		json_add_string "" "sha256_salt"
+		json_close_array
+
+		_ub_login && ok="sha256_salt"
+	else
+		json_add_array "tried"
+		for v in $VARIANTS; do
+			json_add_string "" "$v"
+		done
+		json_close_array
+
+		for v in $VARIANTS; do
+			if _login "$v"; then
+				ok="$v"
+				break
+			fi
+		done
+	fi
 
 	if [ -n "$ok" ]; then
-		uci -q set zte-modem.main.hash_variant="$ok"
-		uci -q commit zte-modem
+		if [ "$VARIANT" != "$ok" ]; then
+			uci -q set zte-modem.main.hash_variant="$ok"
+			uci -q commit zte-modem
+		fi
 		json_add_string  "variant" "$ok"
 		json_add_boolean "success" 1
 	else

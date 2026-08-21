@@ -120,6 +120,7 @@ var body = lines.slice(0, cut).join('\n') + '\nreturn {' +
 	['sample', 'renderHistory', 'chartCard', 'chartBlock', 'quality',
 	 'darkTheme', 'bandOpacity', 'BAND_OPACITY',
 	 'renderStatus', 'dataLimit', 'limitBytes', 'bytes', 'resetDate', 'until',
+	 'carriers', 'carrierRows', 'scellSig', 'bandOf', 'renderDevice',
 	 'HISTORY', 'MAX_SAMPLES', 'LTE_SERIES', 'NR_SERIES'].join(', ') + '};';
 
 module.exports = new Function(body)();
